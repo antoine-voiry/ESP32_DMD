@@ -9,7 +9,7 @@
 #include "util/MessageHandler.h"
 #include "util/MessageFilter.h"
 #include "util/LocalWebServer.h"
-
+#include "matrix/Hub75_Matrix.h"
 static const char* TAG = "Main";  // Add this line for ESP_LOG tag
 
 std::string  mqtt_url = "raspydarts.local"; // Replace with your MQTT broker address
@@ -30,9 +30,9 @@ void initLogging() {
     Serial.begin(115200);
     delay(100);
     // Set log level before any logging happens
-    esp_log_level_set("*", ESP_LOG_VERBOSE); // Show all logs initially
+    esp_log_level_set("*", ESP_LOG_INFO); // Show all logs initially
     esp_log_level_set("wifi", ESP_LOG_INFO); // Less verbose WiFi logs
-    esp_log_level_set("MQTTHelper", ESP_LOG_INFO); // Less verbose MQTT logs
+    esp_log_level_set("MQTTHelper*", ESP_LOG_INFO); // Reduce MQTT logs to warnings only
     esp_log_level_set(TAG, ESP_LOG_DEBUG);   // Debug level for main module
 
     // Test logging
