@@ -4,56 +4,95 @@
 
 static const char* TAG = "Hub75_Matrix";
 
-Hub75_Matrix::Hub75_Matrix(int panel_width, int panel_height, int chain_length) :
-    _panel_width(panel_width),
-    _panel_height(panel_height),
-    _chain_length(chain_length) {
-    ESP_LOGI(TAG, "Creating Hub75_Matrix with width: %d, height: %d, chain: %d", panel_width, panel_height, chain_length);
+Hub75_Matrix::Hub75_Matrix() {
+    ESP_LOGI(TAG, "Creating Hub75_Matrix with width: %d, height: %d, chain: %d", _panel_width, _panel_height, _chain_length);
+
+    HUB75_I2S_CFG::i2s_pins _pins={R1_PIN, G1_PIN, B1_PIN, R2_PIN, G2_PIN, B2_PIN, A_PIN, B_PIN, C_PIN, D_PIN, E_PIN, LAT_PIN, OE_PIN, CLK_PIN};
+    HUB75_I2S_CFG mxconfig(PANEL_WIDTH, PANEL_HEIGHT, PANELS_NUMBER,_pins);
+    mxconfig.gpio.e = E_PIN;  // Set E_PIN to -1 if not used
+    mxconfig.driver = HUB75_I2S_CFG::FM6126A;
+  
+    _matrix = new MatrixPanel_I2S_DMA(mxconfig);
+    _matrix->begin();
+    _matrix->setBrightness8(255);
+  
+    _ledbuff = (CRGB *)malloc(_num_leds * sizeof(CRGB));  // allocate buffer for some tests
+    buffclear(_ledbuff);  
+    // draw a blue circle
+    _matrix->drawCircle(10, 10, 10, _matrix->color444(0, 0, 15));
+    delay(500);
+
+    // fill a violet circle
+    _matrix->fillCircle(40, 21, 10, _matrix->color444(15, 0, 15));
+    delay(500);
+
+    // fill the screen with 'black'
+    _matrix->fillScreen(_matrix->color444(0, 0, 0));    
 }
 
 Hub75_Matrix::~Hub75_Matrix() {
-    if (dma_display) {
-        delete dma_display;
-        dma_display = nullptr;
+    if (_matrix) {
+        delete _matrix;
+        _matrix = nullptr;
         ESP_LOGI(TAG, "Hub75_Matrix destroyed");
     }
 }
 
-bool Hub75_Matrix::begin(int pin_a, int pin_b, int pin_c, int pin_d, int pin_e, int pin_lat, int pin_oe, int pin_clk) {
-    ESP_LOGI(TAG, "Beginning Hub75_Matrix");
-    HUB75_I2S_CFG mxconfig(
-        _panel_width,  // Panel width
-        _panel_height, // Panel height
-        _chain_length  // chain length
-    );
-
-    // Display matrix setup
-    dma_display = new MatrixPanel_I2S_DMA(mxconfig);
-
-    dma_display->begin(pin_a, pin_b, pin_c, pin_d, pin_e, pin_lat, pin_oe, pin_clk);
-    dma_display->clearScreen();
-    dma_display->fillScreen(dma_display->color565(0, 0, 0));
-    return true;
-}
 
 void Hub75_Matrix::fillScreen(uint16_t color) {
-    if (dma_display) {
-        dma_display->fillScreen(color);
+    if (_matrix) {
+        _matrix->fillScreen(color);
     }
 }
 
 void Hub75_Matrix::drawPixel(int16_t x, int16_t y, uint16_t color) {
-    if (dma_display) {
-        dma_display->drawPixel(x, y, color);
+    if (_matrix) {
+        _matrix->drawPixel(x, y, color);
     }
 }
 
 void Hub75_Matrix::swapBuffers(bool copy) {
-    if (dma_display) {
-        dma_display->flipDMABuffer();
+    if (_matrix) {
+        _matrix->flipDMABuffer();
     }
 }
 
 MatrixPanel_I2S_DMA* Hub75_Matrix::getMatrixPanel() {
-    return dma_display;
+    return _matrix;
+}
+
+void Hub75_Matrix::buffclear(CRGB *buf){
+    memset(buf, 0x00, _num_leds * sizeof(CRGB)); // flush buffer to black  
+}
+
+void Hub75_Matrix::drawText(int colorWheelOffset, const char *str, int size){
+    // draw some text
+    _matrix->setTextSize(1);     // size 1 == 8 pixels high
+    _matrix->setTextWrap(false); // Don't wrap at end of line - will do ourselves
+  
+    _matrix->setCursor(5, 5);    // start at top left, with 5,5 pixel of spacing
+    uint8_t w = 0;
+  
+    for (w=0; w<strlen(str); w++) {
+      _matrix->setTextColor(colorWheel((w*32)+colorWheelOffset));
+      _matrix->print(str[w]);
+    }
+}
+
+uint16_t Hub75_Matrix::colorWheel(uint8_t pos) {
+    if(pos < 85) {
+      return _matrix->color565(pos * 3, 255 - pos * 3, 0);
+    } else if(pos < 170) {
+      pos -= 85;
+      return _matrix->color565(255 - pos * 3, 0, pos * 3);
+    } else {
+      pos -= 170;
+      return _matrix->color565(0, pos * 3, 255 - pos * 3);
+    }
+  }
+
+void Hub75_Matrix::setBrightness(uint8_t brightness) {
+    if (_matrix) {
+        _matrix->setBrightness8(brightness);
+    }
 }

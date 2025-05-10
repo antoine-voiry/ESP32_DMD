@@ -1,38 +1,38 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <esp_log.h>
-#include <ESPmDNS.h>  
+#include <ESPmDNS.h>
 #include "util/WifiManagerHelper.h"
 #include "util/ConfigHelper.h"
 #include "util/MQTTHelper.h"
-#include "util/DMDRenderer.h"
 #include "util/MessageHandler.h"
 #include "util/MessageFilter.h"
 #include "util/LocalWebServer.h"
-#include "matrix/Hub75_Matrix.h"
+#include "matrix/Hub75_Matrix.h" // Include the Hub75_Matrix header
 static const char* TAG = "Main";  // Add this line for ESP_LOG tag
 
 std::string  mqtt_url = "raspydarts.local"; // Replace with your MQTT broker address
 std::string  mqtt_topic = "raspydarts/#";
 std::string  mqtt_client_id = "esp32_client";
-WifiManagerHelper *  wifiHelper = nullptr; 
-DMDRenderer * dmdRenderer = nullptr; 
-MessageHandler* messageHandler = nullptr; 
-MessageFilter* messageFilter = nullptr; 
+WifiManagerHelper *  wifiHelper = nullptr;
+//DMDRenderer * dmdRenderer = nullptr;
+MessageHandler* messageHandler = nullptr;
+MessageFilter* messageFilter = nullptr;
 // Define the static member variable
 
-MQTTHelper* mqttClient= nullptr; 
+MQTTHelper* mqttClient= nullptr;
 // Add forward declaration for WebServer instance
 WebServer server(80);
 LocalWebServer* webServer = nullptr;
+Hub75_Matrix* hub75Matrix = nullptr; // Declare Hub75_Matrix object
 
 void initLogging() {
     Serial.begin(115200);
     delay(100);
     // Set log level before any logging happens
-    esp_log_level_set("MQTTHelper*", ESP_LOG_INFO); // Reduce MQTT logs to warnings only
-    esp_log_level_set("wifi", ESP_LOG_INFO); // Less verbose WiFi Logs
     esp_log_level_set("*", ESP_LOG_INFO); // Show all logs initially
+    esp_log_level_set("wifi", ESP_LOG_INFO); // Less verbose WiFi logs
+    esp_log_level_set("MQTTHelper*", ESP_LOG_INFO); // Reduce MQTT logs to warnings only
     esp_log_level_set(TAG, ESP_LOG_DEBUG);   // Debug level for main module
 
     // Test logging
@@ -41,13 +41,13 @@ void initLogging() {
     ESP_LOGI(TAG, "Info level test");
     ESP_LOGD(TAG, "Debug level test");
     ESP_LOGV(TAG, "Verbose level test");
-        
+
 }
 
 bool resolveHostname(const std::string& hostname, IPAddress& resolvedIP) {
     // Wait a bit after WiFi connection before attempting mDNS
     delay(250);
-    
+
     ESP_LOGI(TAG, "Attempting to resolve %s via mDNS...", hostname.c_str());
     // check first, if the hostname is already an IP address using ipaddress.ip_address(host_string)
     IPAddress testIP;
@@ -96,17 +96,15 @@ boolean validateMQTTTReachable(const std::string& hostname, int port) {
 void setup() {
     // Initialize serial communication
     initLogging();
-    
+
     bool forceConfig = !ConfigHelper::getInstance().loadConfigFile();
     ESP_LOGI(TAG, "Config file loaded: %s", forceConfig ? "No" : "Yes");
-    
+
     // Initialize WiFi
     wifiHelper = new WifiManagerHelper();
     wifiHelper->setWMUp(forceConfig, const_cast<char*>(""));
     ESP_LOGI(TAG, "Connected to WiFi");
 
-    // Initialize maxtrix panel
-    Hub75_Matrix* matrix = new Hub75_Matrix();
     // Get configuration
     mqtt_url = ConfigHelper::getInstance().getMqttUrl();
     mqtt_topic = ConfigHelper::getInstance().getMqttPath();
@@ -118,79 +116,35 @@ void setup() {
         if (!resolveHostname(mqtt_url, resolvedIP)) {
             ESP_LOGE(TAG, "Failed to resolve hostname: %s", mqtt_url.c_str());
         } else {
-            ESP_LOGE(TAG, "Resolved hostname: %s", mqtt_url.c_str());
+            ESP_LOGI(TAG, "Resolved hostname: %s to IP: %s", mqtt_url.c_str(), resolvedIP.toString().c_str());
             mqtt_url = resolvedIP.toString().c_str();
         }
     }
 
     if (!validateMQTTTReachable(mqtt_url, 1883)) {
-        ESP_LOGE(TAG, "Network unreachable for MQTT broker: %s", mqtt_url.c_str());
+        ESP_LOGE(TAG, "MQTT Broker not reachable");
     } else {
-        ESP_LOGI(TAG, "Network reachable for MQTT broker: %s", mqtt_url.c_str());
+        ESP_LOGI(TAG, "MQTT Broker reachable");
     }
 
-    ESP_LOGI(TAG, "MQTT Config - URL: %s, Path: %s, Client ID: %s", 
-             mqtt_url.c_str(), mqtt_topic.c_str(), mqtt_client_id.c_str());
-
-    // Initialize MQTT client
+    // Initialize MQTT
     mqttClient = new MQTTHelper(mqtt_url, mqtt_client_id, mqtt_topic);
-    
-    // Initialize other components
-    dmdRenderer = new DMDRenderer(matrix);
-    messageHandler = new MessageHandler(dmdRenderer);
-    messageFilter = new MessageFilter();
+    mqttClient->handleConnect();
 
-    // Initialize web server
-    webServer = new LocalWebServer();
-    webServer->begin();
-
-    ESP_LOGI(TAG, "Setup completed successfully");
+    // Initialize the Hub75_Matrix
+    hub75Matrix = new Hub75_Matrix(64, 32, 1); // Example: 64x32 panel, 1 chain
+    hub75Matrix->begin(2,15,4,16,33,17,5,18); // Example pins, adjust as needed
+    hub75Matrix->fillScreen(hub75Matrix->getMatrixPanel()->color565(0, 0, 255));
+    hub75Matrix->swapBuffers();
+    delay(1000);
+    hub75Matrix->fillScreen(hub75Matrix->getMatrixPanel()->color565(0, 0, 0));
+    hub75Matrix->swapBuffers();
 }
 
 void loop() {
-    static unsigned long lastLog = 0;
-    unsigned long now = millis();
-
-    // Only log every second
-    if (now - lastLog >= 5000) {
-        ESP_LOGD(TAG, "Loop iteration to show this is alive");
-        lastLog = now;
+    if (mqttClient) {
+        mqttClient->handleConnect();
+        mqttClient->loop();
     }
-
-    // Handle web server requests
-    if (webServer && webServer->isRunning()) {
-        webServer->handleClient();
-    }
-
-    // Handle MQTT messages
-    if (mqttClient && mqttClient->handleConnect()) {
-        std::vector<std::string> messages = mqttClient->unStackMessages();
-        for (const auto& message : messages) {
-            if (messageFilter && messageFilter->isValidMessage(message)) {
-                messageHandler->handleMessage(message);
-            } else {
-                ESP_LOGW(TAG, "Invalid message: %s", message.c_str());
-            }
-        }
-    }
-
-    // Small delay to prevent CPU hogging
-    delay(10);
+    delay(1);
 }
-
-void cleanup() {
-    delete webServer;
-    delete mqttClient;
-    delete dmdRenderer;
-    delete messageHandler;
-    delete messageFilter;
-    delete wifiHelper;
-    
-    webServer = nullptr;
-    mqttClient = nullptr;
-    dmdRenderer = nullptr;
-    messageHandler = nullptr;
-    messageFilter = nullptr;
-    wifiHelper = nullptr;
-}
-

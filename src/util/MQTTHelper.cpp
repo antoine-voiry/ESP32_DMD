@@ -21,6 +21,7 @@ MQTTHelper::MQTTHelper(std::string mqtt_url,
 
     ESP_LOGI(TAG, "Initializing MQTT Helper with URL: %s, Client: %s, Topic: %s", 
              _mqtt_url.c_str(), _mqtt_client_id.c_str(), _mqtt_topic.c_str());
+    ESP_LOGI(TAG, "MQTTHelper tag is: '%s'", TAG);
 
     // Initialize PubSubClient with WiFi client
 
@@ -70,7 +71,7 @@ boolean  MQTTHelper::handleConnect() {
     // Resolve the hostname first
 
     if(_mqttClient.connected()) {
-        ESP_LOGD(TAG, "Already connected to MQTT broker: '%s'", _mqtt_url.c_str());
+        //ESP_LOGD(TAG, "Already connected to MQTT broker: '%s'", _mqtt_url.c_str());
         return true;
     }else {
         ESP_LOGE(TAG, "Not connected to: '%s'", _mqtt_url.c_str());
@@ -101,8 +102,9 @@ std::vector<std::string> MQTTHelper::unStackMessages(int maxCount) {
         messageStack.pop_back();
         messageCount++;
     }
-    
-    ESP_LOGV(TAG, "Retrieved %d messages from stack", messageCount);
+    if(messageCount > 0) {
+        ESP_LOGV(TAG, "Unstacked %d messages", messageCount);
+    }
     return messages;
 }
 

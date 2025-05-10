@@ -2,6 +2,9 @@
 #define HUB75_MATRIX_H
 
 #include <ESP32-HUB75-MatrixPanel-I2S-DMA.h>
+#include <FastLED.h>
+#include <Arduino.h>
+#include "xtensa/core-macros.h"
 
 // +---------+   Panel - ESP32 pins
 //|  R1 G1  |    R1   - IO25      G1   - IO26
@@ -37,24 +40,33 @@
 #define CLK_PIN GPIO_NUM_15 //uint8_t pinCLK = 15;
 #define PANEL_WIDTH 64
 #define PANEL_HEIGHT 32         // Panel height of 64 will required PIN_E to be defined.
+#define PANEL_CHAIN 1         // Total number of panels chained one to another
+#define PANELS_NUMBER 1         // Number of chained panels, if just a single panel, obviously set to 1
 
 class Hub75_Matrix {
 public:
-    Hub75_Matrix(int panel_width, int panel_height, int chain_length);
+    Hub75_Matrix();
     ~Hub75_Matrix();
 
-    bool begin(int pin_a, int pin_b, int pin_c, int pin_d, int pin_e, int pin_lat, int pin_oe, int pin_clk);
     void fillScreen(uint16_t color);
     void drawPixel(int16_t x, int16_t y, uint16_t color);
     void swapBuffers(bool copy = false);
+    void buffclear(CRGB *buf);
+    void drawText(int colorWheelOffset, const char *str, int size);
+    void setBrightness(uint8_t brightness);
+    uint16_t colorWheel(uint8_t pos);
     
     MatrixPanel_I2S_DMA* getMatrixPanel(); // Add this getter
 
 private:
-    MatrixPanel_I2S_DMA *dma_display = nullptr;
-    int _panel_width;
-    int _panel_height;
-    int _chain_length;
+    MatrixPanel_I2S_DMA *_matrix = nullptr;
+    // gradient buffer
+    CRGB *_ledbuff = nullptr;
+    int _panel_width = PANEL_WIDTH;
+    int _panel_height = PANEL_HEIGHT;
+    int _chain_length = PANEL_CHAIN;    
+    int _panel_width_chain = PANEL_WIDTH * PANEL_CHAIN;
+    int _num_leds = _panel_width_chain * PANEL_HEIGHT;
 };
 
 #endif

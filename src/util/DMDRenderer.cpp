@@ -3,10 +3,12 @@
 /**
  * * @brief DMDRenderer class constructor
  */
-DMDRenderer::DMDRenderer() {
+DMDRenderer::DMDRenderer(Hub75_Matrix* matrix) {
     standalone = false;
     brightness = 100;
+    _dmd = matrix; // Initialize the matrix object
     // Initialize your DMD hardware here
+    renderFirstStart();
 }
 /** 
  * @brief DMDRenderer class destructor
@@ -15,29 +17,50 @@ DMDRenderer::~DMDRenderer() {
     // Cleanup
 }
 
+void DMDRenderer::renderText(const std::string& text) {
+    renderText(text, false);
+}
 void DMDRenderer::renderText(const std::string& text, bool val) {
     // Implementation for text rendering
     // Example:
     // dmd.clearScreen();
     // dmd.drawString(0, 0, text.c_str());
+    _dmd->drawText(1, text.c_str(),3);
+}
+
+void DMDRenderer::renderText(const std::string& text, const std::string& sens, int iterate, bool val, const std::string& fontName) {
+// Implement font selection
+// Handle text wrapping
+// Implement scrolling based on 'sens' parameter
+// Handle special formatting for score displays if val=true
+
+}
+void DMDRenderer::renderCarrousel() {
+    // Implement text scrolling carousel
+}
+
+void DMDRenderer::renderTime(bool startOrStopTime) {
+    // Implement clock/time display
 }
 
 void DMDRenderer::stop(const std::string& message) {
     // Stop current animation/display
+    _dmd->fillScreen(0); // Clear the screen
 }
 
 void DMDRenderer::renderFirstStart() {
-    renderText("Welcome");
+    renderText("Welcome", false);
 }
 
 void DMDRenderer::renderStandalone() {
     if(standalone) {
-        renderText("standalone Mode");
+        renderText("standalone Mode", false);
     }
 }
 
 void DMDRenderer::warnIsApply() {
-    renderText("Config Applied");
+    
+    renderText("Config Applied", false);
 }
 
 bool DMDRenderer::scoreReceived(const std::string& score) {
@@ -63,6 +86,7 @@ void DMDRenderer::applyConfig(const std::vector<std::string>& config) {
             if(key == "brightness") {
                 brightness = std::stoi(value);
                 // Apply brightness to hardware
+                _dmd->setBrightness(brightness);
             }
             // Add other config parameters
         }
