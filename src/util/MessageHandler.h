@@ -12,6 +12,7 @@ private:
     std::map<std::string, std::function<void(const std::vector<std::string>&)>> handlers;
     DMDRenderer* dmdRenderer;
     MessageHandler() = delete; // Prevent default constructor
+    void setupHandlers();
 
 public:
     MessageHandler(DMDRenderer* renderer);

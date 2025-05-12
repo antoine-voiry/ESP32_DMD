@@ -52,10 +52,22 @@ public:
     void drawPixel(int16_t x, int16_t y, uint16_t color);
     void swapBuffers(bool copy = false);
     void buffclear(CRGB *buf);
-    void drawText(int colorWheelOffset, const char *str, int size);
+    void drawTextRandomColor(int colorWheelOffset, const char *str, int size);
+    void drawTextRandomColorAtPosition(int colorWheelOffset, int xposition, int yposition, const char *str, int size);
     void setBrightness(uint8_t brightness);
+    void startCarrousel(int colorWheelOffset, int position, int speed, boolean LeftRight, int fontSize, const char *str);
+    void stopCarrousel();
+    void update();
     uint16_t colorWheel(uint8_t pos);
     
+    // Getters for private members
+    int getPanelWidth() const { return _panel_width; }
+    int getPanelHeight() const { return _panel_height; }
+    int getChainLength() const { return _chain_length; }
+    int getPanelWidthChain() const { return _panel_width_chain; }
+    int getNumLeds() const { return _num_leds; }
+    CRGB* getLedBuffer() const { return _ledbuff; }
+
     MatrixPanel_I2S_DMA* getMatrixPanel(); // Add this getter
 
 private:

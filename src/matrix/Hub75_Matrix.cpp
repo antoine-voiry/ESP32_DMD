@@ -65,9 +65,9 @@ void Hub75_Matrix::buffclear(CRGB *buf){
     memset(buf, 0x00, _num_leds * sizeof(CRGB)); // flush buffer to black  
 }
 
-void Hub75_Matrix::drawText(int colorWheelOffset, const char *str, int size){
+void Hub75_Matrix::drawTextRandomColor(int colorWheelOffset, const char *str, int size){
     // draw some text
-    _matrix->setTextSize(1);     // size 1 == 8 pixels high
+    _matrix->setTextSize(size);     // size 1 == 8 pixels high
     _matrix->setTextWrap(false); // Don't wrap at end of line - will do ourselves
   
     _matrix->setCursor(5, 5);    // start at top left, with 5,5 pixel of spacing
@@ -78,6 +78,21 @@ void Hub75_Matrix::drawText(int colorWheelOffset, const char *str, int size){
       _matrix->print(str[w]);
     }
 }
+
+void Hub75_Matrix::drawTextRandomColorAtPosition(int colorWheelOffset, int xposition, int yposition, const char *str, int size){
+    // draw some text
+    _matrix->setTextSize(size);     // size 1 == 8 pixels high
+    _matrix->setTextWrap(false); // Don't wrap at end of line - will do ourselves
+  
+    _matrix->setCursor(xposition, yposition);    // start at top left, with 5,5 pixel of spacing
+    uint8_t w = 0;
+  
+    for (w=0; w<strlen(str); w++) {
+      _matrix->setTextColor(colorWheel((w*32)+colorWheelOffset));
+      _matrix->print(str[w]);
+    }
+}
+
 
 uint16_t Hub75_Matrix::colorWheel(uint8_t pos) {
     if(pos < 85) {
@@ -95,4 +110,36 @@ void Hub75_Matrix::setBrightness(uint8_t brightness) {
     if (_matrix) {
         _matrix->setBrightness8(brightness);
     }
+}
+
+
+
+void Hub75_Matrix::stopCarrousel() {
+    if (_matrix) {
+        _matrix->fillScreen(_matrix->color444(0, 0, 0));
+        _matrix->flipDMABuffer();
+    }
+}   
+
+void Hub75_Matrix::startCarrousel(int colorWheelOffset, int position, int speed, boolean leftRight, int fontSize, const char *str) {
+    if (_matrix) {
+        int textWidth = strlen(str) * 6 * fontSize;  // Approximate width of text
+        int startX = leftRight ? -textWidth : _panel_width;
+        int endX = leftRight ? _panel_width : -textWidth;
+        
+        _matrix->setTextSize(fontSize);
+        _matrix->setTextWrap(false);
+        
+        for (int x = startX; leftRight ? x <= endX : x >= endX; x += (leftRight ? 1 : -1)) {
+            _matrix->fillScreen(_matrix->color444(0, 0, 0));
+            _matrix->setCursor(x, position);
+            _matrix->setTextColor(colorWheel(colorWheelOffset));
+            _matrix->print(str);
+            _matrix->flipDMABuffer();
+            delay(speed);
+        }
+    }
+}
+void Hub75_Matrix::update() {
+    /* Not implemented */
 }

@@ -20,13 +20,14 @@ public:
 
     // Basic rendering methods
     void renderText(const std::string& text);
-    void renderText(const std::string& text, bool val = false);
-    void renderText(const std::string& text, const std::string& sens = "", int iterate = 1, bool val = false, const std::string& fontName = "");
-    void renderGif(const std::string& gifPath = "", bool aleatoire = false);
-    void renderImage(const std::string& imagePath = "", bool aleatoire = false);
+    void renderText(const std::string& text, bool val);
+    void renderText(const std::string& text, const std::string& sens, int iterate, bool val , const std::string& fontName );
+    void renderGif(const std::string& gifPath , bool aleatoire );
+    void renderImage(const std::string& imagePath , bool aleatoire);
     void renderTime(const std::string& command, int only = 0);
     void renderCarrousel();
     void renderTime(bool startOrStopTime);
+    void update();
     
     // Config and status methods
     void stop(const std::string& message);

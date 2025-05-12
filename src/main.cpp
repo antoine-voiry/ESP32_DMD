@@ -30,9 +30,9 @@ void initLogging() {
     Serial.begin(115200);
     delay(100);
     // Set log level before any logging happens
-    esp_log_level_set("MQTTHelper*", ESP_LOG_INFO); // Reduce MQTT logs to warnings only
-    esp_log_level_set("wifi", ESP_LOG_INFO); // Less verbose WiFi Logs
-    esp_log_level_set("*", ESP_LOG_INFO); // Show all logs initially
+    esp_log_level_set("MQTTHelper*", ESP_LOG_DEBUG); // Reduce MQTT logs to warnings only
+    esp_log_level_set("wifi", ESP_LOG_DEBUG); // Less verbose WiFi Logs
+    esp_log_level_set("*", ESP_LOG_DEBUG); // Show all logs initially
     esp_log_level_set(TAG, ESP_LOG_DEBUG);   // Debug level for main module
 
     // Test logging
@@ -153,7 +153,7 @@ void loop() {
 
     // Only log every second
     if (now - lastLog >= 5000) {
-        ESP_LOGD(TAG, "Loop iteration to show this is alive");
+        ESP_LOGI(TAG, "Loop iteration to show this is alive");
         lastLog = now;
     }
 
@@ -173,7 +173,7 @@ void loop() {
             }
         }
     }
-
+    dmdRenderer->update(); // Update the DMD renderer
     // Small delay to prevent CPU hogging
     delay(10);
 }

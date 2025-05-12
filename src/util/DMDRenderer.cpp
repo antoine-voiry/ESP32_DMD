@@ -1,116 +1,83 @@
 #include "DMDRenderer.h"
+#include "esp_log.h"
 
-/**
- * * @brief DMDRenderer class constructor
- */
+// Define log tag for this class
+static const char* TAG = "DMDRenderer";
+
 DMDRenderer::DMDRenderer(Hub75_Matrix* matrix) {
+    ESP_LOGI(TAG, "Initializing DMDRenderer");
     standalone = false;
     brightness = 100;
-    _dmd = matrix; // Initialize the matrix object
-    // Initialize your DMD hardware here
+    _dmd = matrix;
     renderFirstStart();
+    ESP_LOGI(TAG, "Initializing DMDRenderer done");
 }
-/** 
- * @brief DMDRenderer class destructor
- */
+
 DMDRenderer::~DMDRenderer() {
-    // Cleanup
+    ESP_LOGI(TAG, "Destroying DMDRenderer");
 }
 
 void DMDRenderer::renderText(const std::string& text) {
-    renderText(text, false);
+    if (text.empty()) {
+        ESP_LOGW(TAG, "Attempted to render empty text");
+        return;
+    }
+
+    ESP_LOGD(TAG, "Rendering text: %s", text.c_str());
+    _dmd->drawTextRandomColor(1, text.c_str(),2);
 }
+
+//TODO: remove what val is used for
 void DMDRenderer::renderText(const std::string& text, bool val) {
-    // Implementation for text rendering
-    // Example:
-    // dmd.clearScreen();
-    // dmd.drawString(0, 0, text.c_str());
-    _dmd->drawText(1, text.c_str(),3);
-}
-
-void DMDRenderer::renderText(const std::string& text, const std::string& sens, int iterate, bool val, const std::string& fontName) {
-// Implement font selection
-// Handle text wrapping
-// Implement scrolling based on 'sens' parameter
-// Handle special formatting for score displays if val=true
-
-}
-void DMDRenderer::renderCarrousel() {
-    // Implement text scrolling carousel
-}
-
-void DMDRenderer::renderTime(bool startOrStopTime) {
-    // Implement clock/time display
+    ESP_LOGD(TAG, "Rendering text with val=%d: %s", val, text.c_str());
+    _dmd->drawTextRandomColor(1, text.c_str(),3);
 }
 
 void DMDRenderer::stop(const std::string& message) {
-    // Stop current animation/display
-    _dmd->fillScreen(0); // Clear the screen
-}
-
-void DMDRenderer::renderFirstStart() {
-    renderText("Welcome", false);
-}
-
-void DMDRenderer::renderStandalone() {
-    if(standalone) {
-        renderText("standalone Mode", false);
-    }
-}
-
-void DMDRenderer::warnIsApply() {
-    
-    renderText("Config Applied", false);
-}
-
-bool DMDRenderer::scoreReceived(const std::string& score) {
-    // Validate score format
-    if(score.empty()) return false;
-    
-    // Example: validate "180 - 140 - 100" format
-    return true;
-}
-
-void DMDRenderer::sendConfigToRaspydarts() {
-    // Send current configuration
-    // Example: brightness, standalone mode, etc.
+    ESP_LOGI(TAG, "Stopping renderer with message: %s", message.c_str());
+    _dmd->fillScreen(0);
 }
 
 void DMDRenderer::applyConfig(const std::vector<std::string>& config) {
+    ESP_LOGI(TAG, "Applying configuration");
     for(const auto& cfg : config) {
         size_t pos = cfg.find(':');
         if(pos != std::string::npos) {
             std::string key = cfg.substr(0, pos);
             std::string value = cfg.substr(pos + 1);
             
+            ESP_LOGD(TAG, "Config: %s = %s", key.c_str(), value.c_str());
+            
             if(key == "brightness") {
-                brightness = std::stoi(value);
-                // Apply brightness to hardware
-                _dmd->setBrightness(brightness);
+                try {
+                    brightness = std::stoi(value);
+                    _dmd->setBrightness(brightness);
+                    ESP_LOGI(TAG, "Brightness set to %d", brightness);
+                } catch (const std::exception& e) {
+                    ESP_LOGE(TAG, "Failed to parse brightness value: %s", e.what());
+                }
             }
-            // Add other config parameters
+        } else {
+            ESP_LOGE(TAG, "Invalid config format: %s", cfg.c_str());
         }
     }
 }
 
-// ...existing code...
+void DMDRenderer::update() {
+    ESP_LOGV(TAG, "Update called"); // Very verbose logging
+    _dmd->update();
+}
+
+bool DMDRenderer::scoreReceived(const std::string& score) {
+    if(score.empty()) {
+        ESP_LOGW(TAG, "Received empty score");
+        return false;
+    }
+    ESP_LOGI(TAG, "Score received: %s", score.c_str());
+    return true;
+}
 
 void DMDRenderer::exclude(bool isFolder, const std::string& name, const std::string& path) {
-    // Implementation for excluding files or folders
-    // For ESP32, this might just log the request since file operations 
-    // might be different from the original implementation
-    
-    ESP_LOGI("DMDRenderer", "Exclude request: isFolder=%d, name=%s, path=%s", 
-             isFolder ? 1 : 0, name.c_str(), path.c_str());
-             
-    // Add your ESP32-specific implementation here
-    // For example, you might want to store these in preferences or SPIFFS
+    ESP_LOGI(TAG, "Excluding %s: %s from path: %s", isFolder ? "folder" : "file", name.c_str(), path.c_str());
 }
 
-// ...existing code...
-
-void DMDRenderer::runThreading() {
-    // Initialize any background tasks
-}
-
-// Add implementations for other methods as needed
