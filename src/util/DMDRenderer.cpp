@@ -22,15 +22,16 @@ void DMDRenderer::renderText(const std::string& text) {
         ESP_LOGW(TAG, "Attempted to render empty text");
         return;
     }
-
+    _dmd->clearScreen();
     ESP_LOGD(TAG, "Rendering text: %s", text.c_str());
-    _dmd->drawTextRandomColor(1, text.c_str(),2);
+    _dmd->drawTextRandomColor(1, text.c_str(),1);
 }
 
 //TODO: remove what val is used for
 void DMDRenderer::renderText(const std::string& text, bool val) {
     ESP_LOGD(TAG, "Rendering text with val=%d: %s", val, text.c_str());
-    _dmd->drawTextRandomColor(1, text.c_str(),3);
+    _dmd->clearScreen();
+    _dmd->drawTextRandomColor(1, text.c_str(),2);
 }
 
 void DMDRenderer::stop(const std::string& message) {
@@ -74,6 +75,7 @@ bool DMDRenderer::scoreReceived(const std::string& score) {
         return false;
     }
     ESP_LOGI(TAG, "Score received: %s", score.c_str());
+    
     return true;
 }
 
@@ -81,3 +83,6 @@ void DMDRenderer::exclude(bool isFolder, const std::string& name, const std::str
     ESP_LOGI(TAG, "Excluding %s: %s from path: %s", isFolder ? "folder" : "file", name.c_str(), path.c_str());
 }
 
+void DMDRenderer::renderFirstStart() {
+    renderText("Welcome");
+}

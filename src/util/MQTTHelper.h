@@ -29,7 +29,7 @@ class MQTTHelper {
         
 
         void handleCallback(char* topic, byte* payload, unsigned int length);
-
+     
         boolean connect(); 
     public:
         MQTTHelper(std::string mqtt_url, 
@@ -37,6 +37,7 @@ class MQTTHelper {
                    std::string mqtt_topic);
                    
         std::vector<std::string> unStackMessages(int maxCount = MAX_MESSAGE_COUNT);
+        void loop();
         boolean handleConnect();
         ~MQTTHelper();
     };

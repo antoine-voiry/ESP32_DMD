@@ -11,6 +11,8 @@
 #include "util/LocalWebServer.h"
 #include "matrix/Hub75_Matrix.h"
 static const char* TAG = "Main";  // Add this line for ESP_LOG tag
+static unsigned long lastLog = 0;  // Move outside loop() to preserve value
+static const int LOG_ALIVE_INTERVAL = 5000; // Maximum number of messages to process at once
 
 std::string  mqtt_url = "raspydarts.local"; // Replace with your MQTT broker address
 std::string  mqtt_topic = "raspydarts/#";
@@ -30,10 +32,11 @@ void initLogging() {
     Serial.begin(115200);
     delay(100);
     // Set log level before any logging happens
-    esp_log_level_set("MQTTHelper*", ESP_LOG_DEBUG); // Reduce MQTT logs to warnings only
+    esp_log_level_set("*", ESP_LOG_INFO); // Show all logs initially
     esp_log_level_set("wifi", ESP_LOG_DEBUG); // Less verbose WiFi Logs
-    esp_log_level_set("*", ESP_LOG_DEBUG); // Show all logs initially
     esp_log_level_set(TAG, ESP_LOG_DEBUG);   // Debug level for main module
+    esp_log_level_set("MQTTHelper*", ESP_LOG_INFO);// increase MQTT logs to debug
+    esp_log_level_set("MQTTHelper", ESP_LOG_INFO);// increase MQTT logs to debug
 
     // Test logging
     ESP_LOGE(TAG, "Error level test");
@@ -147,12 +150,13 @@ void setup() {
     ESP_LOGI(TAG, "Setup completed successfully");
 }
 
+
+
 void loop() {
-    static unsigned long lastLog = 0;
     unsigned long now = millis();
 
     // Only log every second
-    if (now - lastLog >= 5000) {
+    if (now - lastLog >= LOG_ALIVE_INTERVAL) {
         ESP_LOGI(TAG, "Loop iteration to show this is alive");
         lastLog = now;
     }
@@ -164,6 +168,7 @@ void loop() {
 
     // Handle MQTT messages
     if (mqttClient && mqttClient->handleConnect()) {
+        mqttClient->loop();
         std::vector<std::string> messages = mqttClient->unStackMessages();
         for (const auto& message : messages) {
             if (messageFilter && messageFilter->isValidMessage(message)) {
@@ -172,6 +177,9 @@ void loop() {
                 ESP_LOGW(TAG, "Invalid message: %s", message.c_str());
             }
         }
+    }else {
+        ESP_LOGE(TAG, "MQTT client not connected");
+        dmdRenderer->renderText("MQTT client not connected", false);
     }
     dmdRenderer->update(); // Update the DMD renderer
     // Small delay to prevent CPU hogging
@@ -185,7 +193,7 @@ void cleanup() {
     delete messageHandler;
     delete messageFilter;
     delete wifiHelper;
-    
+
     webServer = nullptr;
     mqttClient = nullptr;
     dmdRenderer = nullptr;

@@ -69,6 +69,7 @@ public:
     CRGB* getLedBuffer() const { return _ledbuff; }
 
     MatrixPanel_I2S_DMA* getMatrixPanel(); // Add this getter
+    void clearScreen();
 
 private:
     MatrixPanel_I2S_DMA *_matrix = nullptr;

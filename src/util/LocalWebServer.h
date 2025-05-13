@@ -34,6 +34,7 @@ private:
     void handleConfig();
     void handleGetConfigJson();
     void handleSaveConfig();
+    void handleNotFound();
     
     // Utility methods
     String generateConfigForm(const String& jsonString);

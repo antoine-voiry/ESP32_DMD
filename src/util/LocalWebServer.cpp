@@ -18,6 +18,8 @@ LocalWebServer::LocalWebServer() : server(SERVER_PORT) {
     server.on("/config", std::bind(&LocalWebServer::handleConfig, this));
     server.on("/get_config_json", std::bind(&LocalWebServer::handleGetConfigJson, this));
     server.on("/save_config", HTTP_POST, std::bind(&LocalWebServer::handleSaveConfig, this));
+    server.onNotFound(std::bind(&LocalWebServer::handleNotFound, this));
+
 }
 
 void LocalWebServer::begin() {
@@ -91,6 +93,14 @@ String LocalWebServer::readConfigFile() {
     String jsonString = configFile.readString();
     configFile.close();
     return jsonString;
+}
+
+// Handling not found pages:
+void LocalWebServer::handleNotFound() {
+    String message = "File Not Found\n\n";
+    message += "URI: " + server.uri();
+    ESP_LOGW(TAG, "404 Not Found: %s", server.uri().c_str());
+    server.send(404, "text/plain", message);
 }
 
 void LocalWebServer::handleSaveConfig() {

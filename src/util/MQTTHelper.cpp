@@ -18,7 +18,7 @@ MQTTHelper::MQTTHelper(std::string mqtt_url,
     this->_mqtt_url = mqtt_url;
     this->_mqtt_client_id = mqtt_client_id;    
     this->_mqtt_topic = mqtt_topic;
-
+    ESP_LOGE(TAG, "MQTTHelper tag is: '%s'", TAG);
     ESP_LOGI(TAG, "Initializing MQTT Helper with URL: %s, Client: %s, Topic: %s", 
              _mqtt_url.c_str(), _mqtt_client_id.c_str(), _mqtt_topic.c_str());
     ESP_LOGI(TAG, "MQTTHelper tag is: '%s'", TAG);
@@ -64,6 +64,7 @@ boolean MQTTHelper::connect() {
         }
     }
     return _mqttClient.connected();
+   
 }
 
 
@@ -103,7 +104,7 @@ std::vector<std::string> MQTTHelper::unStackMessages(int maxCount) {
         messageCount++;
     }
     if(messageCount > 0) {
-        ESP_LOGV(TAG, "Unstacked %d messages", messageCount);
+        ESP_LOGI(TAG, "Unstacked %d messages", messageCount);
     }
     return messages;
 }
@@ -118,6 +119,13 @@ void MQTTHelper::handleCallback(char* topic, byte* payload, unsigned int length)
 
     messageStack.push_back(message);
     ESP_LOGD(TAG, "Received message on topic %s: %s", topic, message.c_str());
+}
+
+void MQTTHelper::loop() {
+    // Call the loop function to process incoming messages
+    if (_mqttClient.connected()) {
+        _mqttClient.loop();
+    }
 }
 
 

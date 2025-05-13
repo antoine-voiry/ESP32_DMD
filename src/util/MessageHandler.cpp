@@ -11,14 +11,16 @@ MessageHandler::MessageHandler(DMDRenderer* renderer) : dmdRenderer(renderer) {
 
 void MessageHandler::setupHandlers() {
     // Initialize message handlers map
-    handlers["rebt"] = [](const std::vector<std::string>& params) {
+    handlers["rebt"] = [this](const std::vector<std::string>& params) {
         ESP_LOGW(TAG, "Reboot command received - not implemented for ESP32");
+        dmdRenderer->renderText("Reboot command received - not implemented for ESP32");
         // TODO: Implement proper ESP32 restart
     };
 
-    handlers["shutdwn"] = [](const std::vector<std::string>& params) {
+    handlers["shutdwn"] = [this](const std::vector<std::string>& params) {
         ESP_LOGW(TAG, "Shutdown command received - not implemented for ESP32");
         // TODO: Implement proper ESP32 shutdown
+        dmdRenderer->renderText("Shutdown command received - not implemented for ESP32");
     };
 
     handlers["excludeFolder"] = [this](const std::vector<std::string>& params) {

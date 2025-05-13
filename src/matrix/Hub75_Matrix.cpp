@@ -65,20 +65,39 @@ void Hub75_Matrix::buffclear(CRGB *buf){
     memset(buf, 0x00, _num_leds * sizeof(CRGB)); // flush buffer to black  
 }
 
+/**
+ * @brief Draws text on the matrix with a random color for each character.
+ * @param colorWheelOffset Offset for the color wheel.
+ * @param str The string to draw.   
+ * @param size Desired text size. 1 is default 6x8, 2 is 12x16, 3 is 18x24, etc.
+ * @note The text is drawn at the position (5, 5)
+ *  with a between each character defined by the size (1 pixel of 1, 2 for 2, etc...). 
+ */
 void Hub75_Matrix::drawTextRandomColor(int colorWheelOffset, const char *str, int size){
     // draw some text
+    //Desired text size. 1 is default 6x8, 2 is 12x16, 3 is 18x24, etc
     _matrix->setTextSize(size);     // size 1 == 8 pixels high
     _matrix->setTextWrap(false); // Don't wrap at end of line - will do ourselves
   
     _matrix->setCursor(5, 5);    // start at top left, with 5,5 pixel of spacing
     uint8_t w = 0;
-  
+    
     for (w=0; w<strlen(str); w++) {
       _matrix->setTextColor(colorWheel((w*32)+colorWheelOffset));
       _matrix->print(str[w]);
     }
 }
 
+/**
+ * @brief Draws text on the matrix with a random color for each character.
+ * @param colorWheelOffset Offset for the color wheel.
+ * @param xposition The x position to start drawing the text.
+ * @param yposition The y position to start drawing the text.   
+ * @param str The string to draw.   
+ * @param size Desired text size. 1 is default 6x8, 2 is 12x16, 3 is 18x24, etc.
+ * @note The text is drawn at the position provided by the parameters xposition and yposition
+ *  with a between each character defined by the size (1 pixel of 1, 2 for 2, etc...). 
+ */
 void Hub75_Matrix::drawTextRandomColorAtPosition(int colorWheelOffset, int xposition, int yposition, const char *str, int size){
     // draw some text
     _matrix->setTextSize(size);     // size 1 == 8 pixels high
@@ -93,7 +112,12 @@ void Hub75_Matrix::drawTextRandomColorAtPosition(int colorWheelOffset, int xposi
     }
 }
 
-
+/**
+ * @brief Generates a color based on the position in the color wheel.
+ * @param pos The position in the color wheel (0-255).
+ * @return The color in RGB565 format.
+ * @note This function generates a color based on the position in the color wheel.  
+ */
 uint16_t Hub75_Matrix::colorWheel(uint8_t pos) {
     if(pos < 85) {
       return _matrix->color565(pos * 3, 255 - pos * 3, 0);
@@ -106,6 +130,12 @@ uint16_t Hub75_Matrix::colorWheel(uint8_t pos) {
     }
   }
 
+  /**
+   * @brief Sets the brightness of the matrix.
+   * @param brightness The brightness level (0-255).    
+   * @note This function sets the brightness of the matrix.
+   *  The brightness level can be adjusted from 0 (off) to 255 (full brightness).
+   */
 void Hub75_Matrix::setBrightness(uint8_t brightness) {
     if (_matrix) {
         _matrix->setBrightness8(brightness);
@@ -113,7 +143,10 @@ void Hub75_Matrix::setBrightness(uint8_t brightness) {
 }
 
 
-
+/**
+ *  @brief Stops the carrousel effect by clearing the screen.
+ *  @note This function clears the screen and stops the carrousel effect.   
+ */
 void Hub75_Matrix::stopCarrousel() {
     if (_matrix) {
         _matrix->fillScreen(_matrix->color444(0, 0, 0));
@@ -121,6 +154,17 @@ void Hub75_Matrix::stopCarrousel() {
     }
 }   
 
+/**
+ *  @brief Starts a carrousel effect with the given parameters.
+ *  @param colorWheelOffset Offset for the color wheel.
+ *  @param position The y position to start drawing the text.
+ *  @param speed The speed of the carrousel effect.
+ *  @param leftRight Direction of the carrousel effect (true for left, false for right).
+ *  @param fontSize The size of the font to use.
+ *  @param str The string to draw.
+ * @note This function creates a carrousel effect with the given parameters.    
+ * The text will move from one side of the screen to the other,
+ */
 void Hub75_Matrix::startCarrousel(int colorWheelOffset, int position, int speed, boolean leftRight, int fontSize, const char *str) {
     if (_matrix) {
         int textWidth = strlen(str) * 6 * fontSize;  // Approximate width of text
@@ -142,4 +186,15 @@ void Hub75_Matrix::startCarrousel(int colorWheelOffset, int position, int speed,
 }
 void Hub75_Matrix::update() {
     /* Not implemented */
+}
+
+/**
+ * @brief Clears the screen.
+
+ */
+void Hub75_Matrix::clearScreen() {
+    if (_matrix) {
+        _matrix->fillScreen(_matrix->color444(0, 0, 0));
+        _matrix->flipDMABuffer();
+    }
 }
