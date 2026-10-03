@@ -20,14 +20,15 @@ run: cxx11 $(BUILD)/test_core
 	./$(BUILD)/test_core
 
 # JSON parsers (src/net) need ArduinoJson: make json ARDUINOJSON=/path/to/ArduinoJson/src
-# (-isystem: warnings inside the third-party headers must not fail our -Werror build)
+# (-isystem + -Wno-error=maybe-uninitialized: GCC reports a known false positive inside ArduinoJson
+#  after inlining it into our code; it stays a warning, everything else is still -Werror)
 json: $(BUILD)/test_json
 	./$(BUILD)/test_json
 
 $(BUILD)/test_json: test_json.cpp $(SRC_DIR)/net/OnlineJson.cpp $(CORE_SRCS)
 	@test -n "$(ARDUINOJSON)" || (echo "Set ARDUINOJSON=<ArduinoJson>/src" && false)
 	@mkdir -p $(BUILD)
-	$(CXX) $(CXXFLAGS) -fsanitize=address,undefined -I$(SRC_DIR) -isystem $(ARDUINOJSON) test_json.cpp $(SRC_DIR)/net/OnlineJson.cpp $(CORE_SRCS) -o $@
+	$(CXX) $(CXXFLAGS) -fsanitize=address,undefined -Wno-error=maybe-uninitialized -I$(SRC_DIR) -isystem $(ARDUINOJSON) test_json.cpp $(SRC_DIR)/net/OnlineJson.cpp $(CORE_SRCS) -o $@
 
 clean:
 	rm -rf $(BUILD)
