@@ -27,6 +27,8 @@ void ConfigHelper::saveConfigFile() {
     json["mqtt_url"] = _mqtt_url;
     json["mqtt_path"] = _mqtt_path;
     json["hostname"] = _hostname;
+    json["brightness"] = _brightness;
+    json["brightnesshours"] = _brightnessHours;
      
     File configFile = SPIFFS.open(JSON_CONFIG_FILE, "w");
     if (!configFile) {
@@ -92,6 +94,9 @@ bool ConfigHelper::loadConfigFile() {
                             _mqtt_path = std::string(path);
                             _mqtt_url = std::string(url);
                             _hostname = std::string(host);
+                            // Optional keys, absent from config files written by older firmware.
+                            _brightness = json["brightness"] | 90;
+                            _brightnessHours = std::string(json["brightnesshours"] | "");
 
                             ESP_LOGD(TAG, "MQTT Path in variable: %s, URL: %s, Hostname: %s", 
                                 _mqtt_path.c_str(), _mqtt_url.c_str(), _hostname.c_str());

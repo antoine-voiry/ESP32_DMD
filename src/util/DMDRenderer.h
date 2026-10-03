@@ -1,57 +1,60 @@
 #ifndef DMD_RENDERER_H
 #define DMD_RENDERER_H
 
+// ESP32 counterpart of Raspy2DMD bin/DMDRenderer.py. Rendering is non-blocking: every call queues
+// a scene on the SceneRunner, and update() (called from loop()) advances the current animation.
+
 #include <string>
-#include <vector>
-#include <Arduino.h>
+
+#include "core/Motion.h"
+#include "core/SceneRunner.h"
+#include "core/TextUtil.h"
 #include "matrix/Hub75_Matrix.h"
-class DMDRenderer {
-private:
-    bool standalone;
-    int brightness;
-    // Add your DMD hardware interface here
-    // For example: DMD dmd;
-    Hub75_Matrix* _dmd = nullptr; // Pointer to the matrix object
-    DMDRenderer() = delete; // Prevent default constructor
+#include "render/TextScene.h"
 
-public:
-    DMDRenderer(Hub75_Matrix* matrix);
-    ~DMDRenderer();
-
-    // Basic rendering methods
-    void renderText(const std::string& text);
-    void renderText(const std::string& text, bool val);
-    void renderText(const std::string& text, const std::string& sens, int iterate, bool val , const std::string& fontName );
-    void renderGif(const std::string& gifPath , bool aleatoire );
-    void renderImage(const std::string& imagePath , bool aleatoire);
-    void renderTime(const std::string& command, int only = 0);
-    void renderCarrousel();
-    void renderTime(bool startOrStopTime);
-    void update();
-    
-    // Config and status methods
-    void stop(const std::string& message);
-    void renderFirstStart();
-    void renderStandalone();
-    void warnIsApply();
-    bool scoreReceived(const std::string& score);
-    void sendConfigToRaspydarts();
-    void runThreading();
-    void applyConfig(const std::vector<std::string>& config);
-    
-    // File management
-    void exclude(bool isFolder, const std::string& name, const std::string& path);
-    
-    // Special features
-    void zipPostCodeGeocoding();
-    void findLatLonCityname();
-    void renderMeteoInTime();
-    void renderMeteoPrevisionnelle();
-    void renderEDFJoursTempo();
-    void renderSOC();
-    void playSound();
-    
-    // Friend class for access to private members
-    friend class MessageHandler;
+struct TextRequest {
+    std::string text;
+    dmd::Motion motion = dmd::Motion::None;
+    int iterations = 1;
+    bool hasFg = false;
+    dmd::Rgb fg;
+    bool hasBg = false;
+    dmd::Rgb bg;
 };
+
+class DMDRenderer {
+public:
+    explicit DMDRenderer(Hub75_Matrix* matrix);
+    DMDRenderer() = delete;
+
+    // Advance the current animation. Call on every loop().
+    void update();
+
+    // Port of Stop(): abort the animation on screen because a newer message arrived.
+    void interrupt();
+
+    // Port of RenderText(). holdMs is the "|N" trailing argument (N seconds) of the original.
+    void renderText(const TextRequest& request, uint32_t holdMs = 0);
+    void renderText(const std::string& text, uint32_t holdMs = 0);
+
+    // Port of RenderText(val=True): special move name (if any) for 2 s, then the darts.
+    void renderScore(const std::string& score, uint32_t holdMs = 0);
+
+    // Status line shown by the firmware itself (MQTT down, ...), replaces whatever is queued.
+    void renderStatus(const std::string& text);
+
+    void clear();
+    void setBrightnessPercent(int percent);
+
+    // TextRenderer defaults ([TextRenderer] section of Raspy2DMD.cfg).
+    TextStyle& defaultStyle() { return _defaults; }
+
+    bool idle() const;
+
+private:
+    Hub75_Matrix* _dmd;
+    dmd::SceneRunner _runner;
+    TextStyle _defaults;
+};
+
 #endif

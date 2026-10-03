@@ -1,88 +1,82 @@
 #include "DMDRenderer.h"
+
+#include <memory>
+
+#include "core/Protocol.h"
+#include "core/SpecialMoves.h"
 #include "esp_log.h"
 
-// Define log tag for this class
 static const char* TAG = "DMDRenderer";
 
-DMDRenderer::DMDRenderer(Hub75_Matrix* matrix) {
+// RenderText(val=True) sleeps 2 s after showing a special move before showing the score.
+static constexpr uint32_t kSpecialMoveHoldMs = 2000;
+
+DMDRenderer::DMDRenderer(Hub75_Matrix* matrix) : _dmd(matrix) {
     ESP_LOGI(TAG, "Initializing DMDRenderer");
-    standalone = false;
-    brightness = 100;
-    _dmd = matrix;
-    renderFirstStart();
-    ESP_LOGI(TAG, "Initializing DMDRenderer done");
-}
-
-DMDRenderer::~DMDRenderer() {
-    ESP_LOGI(TAG, "Destroying DMDRenderer");
-}
-
-void DMDRenderer::renderText(const std::string& text) {
-    if (text.empty()) {
-        ESP_LOGW(TAG, "Attempted to render empty text");
-        return;
-    }
-    _dmd->clearScreen();
-    ESP_LOGD(TAG, "Rendering text: %s", text.c_str());
-    _dmd->drawTextRandomColor(1, text.c_str(),1);
-}
-
-//TODO: remove what val is used for
-void DMDRenderer::renderText(const std::string& text, bool val) {
-    ESP_LOGD(TAG, "Rendering text with val=%d: %s", val, text.c_str());
-    _dmd->clearScreen();
-    _dmd->drawTextRandomColor(1, text.c_str(),2);
-}
-
-void DMDRenderer::stop(const std::string& message) {
-    ESP_LOGI(TAG, "Stopping renderer with message: %s", message.c_str());
-    _dmd->fillScreen(0);
-}
-
-void DMDRenderer::applyConfig(const std::vector<std::string>& config) {
-    ESP_LOGI(TAG, "Applying configuration");
-    for(const auto& cfg : config) {
-        size_t pos = cfg.find(':');
-        if(pos != std::string::npos) {
-            std::string key = cfg.substr(0, pos);
-            std::string value = cfg.substr(pos + 1);
-            
-            ESP_LOGD(TAG, "Config: %s = %s", key.c_str(), value.c_str());
-            
-            if(key == "brightness") {
-                try {
-                    brightness = std::stoi(value);
-                    _dmd->setBrightness(brightness);
-                    ESP_LOGI(TAG, "Brightness set to %d", brightness);
-                } catch (const std::exception& e) {
-                    ESP_LOGE(TAG, "Failed to parse brightness value: %s", e.what());
-                }
-            }
-        } else {
-            ESP_LOGE(TAG, "Invalid config format: %s", cfg.c_str());
-        }
-    }
 }
 
 void DMDRenderer::update() {
-    ESP_LOGV(TAG, "Update called"); // Very verbose logging
-    _dmd->update();
+    _runner.update(millis());
 }
 
-bool DMDRenderer::scoreReceived(const std::string& score) {
-    if(score.empty()) {
-        ESP_LOGW(TAG, "Received empty score");
-        return false;
+void DMDRenderer::interrupt() {
+    _runner.interrupt();
+}
+
+void DMDRenderer::renderText(const TextRequest& request, uint32_t holdMs) {
+    TextStyle style = _defaults;
+    style.motion = request.motion;
+    style.iterations = request.iterations < 1 ? 1 : request.iterations;
+    if (request.hasFg) style.fg = request.fg;
+    if (request.hasBg) style.bg = request.bg;
+    if (dmd::isHorizontalScroll(style.motion)) {
+        style.maxCharsPerLine = 9999;  // scrolling text is a single line
     }
-    ESP_LOGI(TAG, "Score received: %s", score.c_str());
-    
-    return true;
+    ESP_LOGD(TAG, "Queue text '%s' (hold %u ms)", request.text.c_str(), static_cast<unsigned>(holdMs));
+    _runner.enqueue(std::unique_ptr<dmd::Scene>(new TextScene(*_dmd, request.text, style)), holdMs);
 }
 
-void DMDRenderer::exclude(bool isFolder, const std::string& name, const std::string& path) {
-    ESP_LOGI(TAG, "Excluding %s: %s from path: %s", isFolder ? "folder" : "file", name.c_str(), path.c_str());
+void DMDRenderer::renderText(const std::string& text, uint32_t holdMs) {
+    TextRequest request;
+    request.text = text;
+    renderText(request, holdMs);
 }
 
-void DMDRenderer::renderFirstStart() {
-    renderText("Welcome");
+void DMDRenderer::renderScore(const std::string& score, uint32_t holdMs) {
+    const std::string upper = dmd::toUpper(score);
+    const std::vector<std::string> darts = dmd::splitScore(upper);
+    bool hasMiss = false;
+    for (const auto& d : darts) {
+        if (d == "X") hasMiss = true;
+    }
+    // TODO(phase 3): play a random GIF from Scores/<last dart> and SpecialsMoves/<move> when present.
+    if (!hasMiss) {
+        std::string move = dmd::findSpecialMove(darts);
+        if (!move.empty()) {
+            for (auto& c : move) {
+                if (c == '_') c = ' ';
+            }
+            ESP_LOGI(TAG, "Special move: %s", move.c_str());
+            renderText(move, kSpecialMoveHoldMs);
+        }
+    }
+    renderText(upper, holdMs);
+}
+
+void DMDRenderer::renderStatus(const std::string& text) {
+    _runner.reset();
+    renderText(text);
+}
+
+void DMDRenderer::clear() {
+    _runner.reset();
+    _dmd->clearScreen();
+}
+
+void DMDRenderer::setBrightnessPercent(int percent) {
+    _dmd->setBrightnessPercent(percent);
+}
+
+bool DMDRenderer::idle() const {
+    return _runner.idle(millis());
 }

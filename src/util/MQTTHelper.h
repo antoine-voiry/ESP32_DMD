@@ -3,6 +3,7 @@
 #include <ESPmDNS.h>  // Add this include for mDNS support
 #include <PubSubClient.h>
 #include <WiFi.h>
+#include <deque>
 #include <vector>
 #include <string>
 #include <esp_log.h>
@@ -18,7 +19,7 @@ class MQTTHelper {
         std::string _mqtt_url;
         std::string _mqtt_client_id;
         std::string _mqtt_topic;
-        std::vector<std::string> messageStack;
+        std::deque<std::string> messageQueue;  // FIFO: messages are rendered in arrival order
         
         // Reconnection handling
         unsigned long lastReconnectAttempt = 0;

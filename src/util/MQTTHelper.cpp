@@ -98,9 +98,9 @@ std::vector<std::string> MQTTHelper::unStackMessages(int maxCount) {
     std::vector<std::string> messages;
     int messageCount = 0;
     // Get up to maxCount messages from the stack
-    while (!messageStack.empty() && messageCount < maxCount) {
-        messages.push_back(messageStack.back());
-        messageStack.pop_back();
+    while (!messageQueue.empty() && messageCount < maxCount) {
+        messages.push_back(messageQueue.front());
+        messageQueue.pop_front();
         messageCount++;
     }
     if(messageCount > 0) {
@@ -111,13 +111,9 @@ std::vector<std::string> MQTTHelper::unStackMessages(int maxCount) {
 
 
 void MQTTHelper::handleCallback(char* topic, byte* payload, unsigned int length) {
+    // Runs inside PubSubClient::loop(): only queue the message, reconnection is handled by loop().
     std::string message(reinterpret_cast<char*>(payload), length);
-    if(!_mqttClient.connected()) {
-        ESP_LOGE(TAG, "MQTT client not connected, trying to reconnect");
-        connect();
-    }
-
-    messageStack.push_back(message);
+    messageQueue.push_back(message);
     ESP_LOGD(TAG, "Received message on topic %s: %s", topic, message.c_str());
 }
 
