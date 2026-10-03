@@ -3,13 +3,15 @@
 #include <esp_sleep.h>
 
 #include "ConfigHelper.h"
+#include "Settings.h"
 #include "core/Fx.h"
 #include "core/Protocol.h"
 #include "esp_log.h"
 
 static const char* TAG = "MessageHandler";
 
-MessageHandler::MessageHandler(DMDRenderer* renderer) : dmdRenderer(renderer) {
+MessageHandler::MessageHandler(DMDRenderer* renderer, AttractController* attract, TimeService* timeService)
+    : dmdRenderer(renderer), attract(attract), timeService(timeService) {
     ESP_LOGI(TAG, "Initializing MessageHandler");
     setupHandlers();
 }
@@ -150,6 +152,58 @@ void MessageHandler::setupHandlers() {
         dmdRenderer->renderFx(fx);
     };
 
+    ////////////////////////////////////////////////////////////////////////////
+    // Clock, attract mode and carousel (phase 2)
+
+    // time|start or time|stop (an optional 2nd argument is ignored, as it was by RunTime())
+    handlers["time"] = [this](const std::vector<std::string>& params) {
+        if (params[0] == "start") {
+            if (ConfigHelper::getInstance().getSettingInt("ClockRenderer", "showing_datehours", 2) == 0) {
+                ESP_LOGI(TAG, "time|start ignored: ClockRenderer.showing_datehours is 0");
+                return;
+            }
+            dmdRenderer->renderClock(settings::clockSpec());
+        } else {
+            dmdRenderer->clear();
+        }
+    };
+
+    // testPattern|Modele01.png: clock preview; the pattern itself needs PNG support (phase 3).
+    handlers["testPattern"] = [this](const std::vector<std::string>& params) {
+        ESP_LOGW(TAG, "testPattern '%s': background patterns need media support (phase 3)", params[0].c_str());
+        ClockSpec spec = settings::clockSpec();
+        spec.mode = 2;
+        dmdRenderer->renderClock(spec);
+    };
+
+    // waiter|start|stop|pause|resume
+    handlers["waiter"] = [this](const std::vector<std::string>& params) {
+        const std::string& cmd = params[0];
+        if (cmd == "start" || cmd == "resume") {
+            attract->start(settings::scrollOrder());
+        } else {
+            attract->stop();  // stop, pause
+        }
+    };
+
+    // msgcarrou|start or msgcarrou|stop
+    handlers["msgcarrou"] = [this](const std::vector<std::string>& params) {
+        if (params[0] == "start") {
+            attract->start("4");
+        } else {
+            attract->stop();
+            dmdRenderer->clear();
+        }
+    };
+
+    // rldconf: settings are read live; re-apply the ones cached at start-up.
+    handlers["rldconf"] = [this](const std::vector<std::string>&) {
+        dmdRenderer->defaultStyle() = settings::textStyle();
+        dmdRenderer->setBrightnessPercent(ConfigHelper::getInstance().getBrightness());
+        timeService->begin(settings::timezone());
+        timeService->invalidate();
+    };
+
     handlers["sound"] = [](const std::vector<std::string>&) {
         ESP_LOGW(TAG, "'sound' ignored: the ESP32 build has no audio output");
     };
@@ -160,11 +214,6 @@ void MessageHandler::setupHandlers() {
         const char* action;
         const char* phase;
     } pending[] = {
-        {"waiter", "phase 2, attract mode"},
-        {"msgcarrou", "phase 2, carousel"},
-        {"time", "phase 2, clock"},
-        {"testPattern", "phase 2, clock"},
-        {"rldconf", "phase 5, settings"},
         {"receipconf", "phase 5, settings"},
         {"excludeFolder", "phase 3, media"},
         {"excludeFile", "phase 3, media"},
@@ -216,16 +265,25 @@ void MessageHandler::applyConf(const std::vector<std::string>& params) {
             changed = true;
             ESP_LOGI(TAG, "Brightness set to %ld %%", pct);
         } else if (section == "DMDRenderer" && key == "brightnesshours") {
-            // Applied hour by hour once the clock is ported (phase 2); stored now.
             config.setBrightnessHours(value);
+            timeService->invalidate();
             changed = true;
         } else {
-            ESP_LOGW(TAG, "conf: [%s] %s is not supported on the ESP32 yet (phase 5, settings)",
-                     section.c_str(), key.c_str());
+            // Everything else is stored and read live (see util/Settings).
+            config.setSetting(section, key, value);
+            changed = true;
+            ESP_LOGI(TAG, "conf: [%s] %s = %s", section.c_str(), key.c_str(), value.c_str());
+            if (section == "ClockRenderer" && key == "timezone") {
+                timeService->begin(settings::timezone());
+                timeService->invalidate();
+            }
         }
     }
     if (changed) {
         config.saveConfigFile();
+        if (section == "TextRenderer") {
+            dmdRenderer->defaultStyle() = settings::textStyle();
+        }
     }
 }
 

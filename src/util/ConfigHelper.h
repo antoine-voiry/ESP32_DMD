@@ -12,6 +12,7 @@
 #define CONFIG_HELPER_H
 
 // SPI Flash Syetem Library
+#include <map>
 #include <string>
 #include <SPIFFS.h>
 #include <Arduino.h>
@@ -35,6 +36,9 @@ class ConfigHelper
     int _brightness = 90;                 // [DMDRenderer] brightness, percent
     std::string _brightnessHours;         // [DMDRenderer] brightnesshours, 24 comma-separated percents
     boolean _configLoaded = false; // Flag to check if config was saved
+    // Raspy2DMD settings received with conf|Section|key:value, keyed "Section.key".
+    // Persisted under "settings" in config.json; callers supply the Raspy2DMD defaults.
+    std::map<std::string, std::string> _settings;
 
     static ConfigHelper* _instance; // Static instance pointer
     // Private constructor to prevent public instantiation
@@ -63,6 +67,10 @@ class ConfigHelper
     void setBrightness(int brightness) { _brightness = brightness; }
     const std::string& getBrightnessHours() const { return _brightnessHours; }
     void setBrightnessHours(const std::string& hours) { _brightnessHours = hours; }
+
+    std::string getSetting(const std::string& section, const std::string& key, const std::string& fallback) const;
+    long getSettingInt(const std::string& section, const std::string& key, long fallback) const;
+    void setSetting(const std::string& section, const std::string& key, const std::string& value);
 
     boolean isConfigLoaded() const {
         return _configLoaded;

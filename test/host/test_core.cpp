@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 
+#include "core/Attract.h"
+#include "core/Clock.h"
 #include "core/Fx.h"
 #include "core/Motion.h"
 #include "core/Protocol.h"
@@ -313,6 +315,76 @@ static void testStarsAndRain() {
     CHECK_EQ(rain.level(64, 0), 0);
 }
 
+static void testClockFormat() {
+    DateTime dt;
+    dt.year = 2026; dt.month = 10; dt.day = 3; dt.hour = 9; dt.minute = 5; dt.second = 7; dt.weekday = 6;
+    // Raspy2DMD defaults: format_date '%d %b %Y', format_hours '%H:%M:%S', fr_FR.
+    CHECK_EQ(formatDateTime("%d %b %Y", dt), std::string("03 oct. 2026"));
+    CHECK_EQ(formatDateTime("%H:%M:%S", dt), std::string("09:05:07"));
+    CHECK_EQ(formatDateTime("%-H:%M", dt), std::string("9:05"));
+    CHECK_EQ(formatDateTime("%A %-d %B", dt), std::string("samedi 3 octobre"));
+    CHECK_EQ(formatDateTime("%a %d %b", dt, "en"), std::string("Sat 03 Oct"));
+    CHECK_EQ(formatDateTime("%I:%M %p", dt, "en"), std::string("09:05 AM"));
+    dt.hour = 0;
+    CHECK_EQ(formatDateTime("%I %p", dt), std::string("12 AM"));
+    dt.month = 2;
+    CHECK_EQ(toDisplayAscii(formatDateTime("%b", dt)), std::string("fevr."));
+    CHECK_EQ(formatDateTime("100%% %q", dt), std::string("100% %q"));
+    CHECK_EQ(languageFromLocale("en_GB"), std::string("en"));
+    CHECK_EQ(languageFromLocale("fr_FR"), std::string("fr"));
+
+    CHECK_EQ(posixTimezone("Europe/Paris"), std::string("CET-1CEST,M3.5.0,M10.5.0/3"));
+    CHECK_EQ(posixTimezone("Europe/London"), std::string("GMT0BST,M3.5.0/1,M10.5.0"));
+    CHECK_EQ(posixTimezone("EST5EDT"), std::string("EST5EDT"));
+    CHECK_EQ(posixTimezone("Mars/Olympus"), std::string("CET-1CEST,M3.5.0,M10.5.0/3"));
+
+    const std::string hours = "10,10,10,10,10,10,50,90,90,90,90,90,90,90,90,90,90,90,90,90,90,60,30,10";
+    CHECK_EQ(brightnessForHour(hours, 0, 77), 10);
+    CHECK_EQ(brightnessForHour(hours, 7, 77), 90);
+    CHECK_EQ(brightnessForHour(hours, 22, 77), 30);
+    CHECK_EQ(brightnessForHour(hours, 24, 77), 77);
+    CHECK_EQ(brightnessForHour("90,90", 3, 77), 77);
+    CHECK_EQ(brightnessForHour("", 3, 77), 77);
+}
+
+static void testAttract() {
+    AttractPlaylist p("1,T, 4 ,M,X,F", "T4F");
+    CHECK_EQ(p.codes().size(), 3u);
+    CHECK_EQ(p.next(), 'T');
+    CHECK_EQ(p.next(), '4');
+    CHECK_EQ(p.next(), 'F');
+    CHECK_EQ(p.next(), 'T');
+    AttractPlaylist none("1,2", "T4F");  // Raspy2DMD default "1,T" minus GIFs still has T
+    CHECK(none.empty());
+    CHECK_EQ(none.next(), '\0');
+    CHECK_EQ(AttractPlaylist("1,T", "T4F").codes().size(), 1u);
+
+    CarouselEntry e = parseCarouselFile("DG;IT3\r\nBonjour\r\nles amis\r\n");
+    CHECK(e.valid && e.hasOptions);
+    CHECK(e.motion == Motion::Left);
+    CHECK_EQ(e.iterations, 3);
+    CHECK_EQ(e.message, std::string(" Bonjour les amis"));
+    e = parseCarouselFile("\nJuste un texte");
+    CHECK(e.valid && !e.hasOptions && e.motion == Motion::None);
+    e = parseCarouselFile("A;\xE2\x99\xA0" "fete.gif\nBravo");
+    CHECK(e.randomMotion);
+    CHECK_EQ(e.gifBackground, std::string("fete.gif"));
+    e = parseCarouselFile("A;GD\nX");  // later option wins
+    CHECK(!e.randomMotion && e.motion == Motion::Right);
+    CHECK(!parseCarouselFile("GD").valid);
+    CHECK(!parseCarouselFile("").valid);
+    CHECK(carouselRandomMotion(9) == Motion::Right);
+
+    IdleTimer t;
+    t.touch(0);
+    CHECK(!t.expired(100000));  // disabled by default
+    t.configure(30000);
+    t.touch(1000);
+    CHECK(!t.expired(30000));
+    CHECK(t.expired(31000));
+    CHECK(!t.expired(40000));   // fires once per touch
+}
+
 int main() {
     testParseCommand();
     testFilter();
@@ -325,6 +397,8 @@ int main() {
     testFx();
     testFireworks();
     testStarsAndRain();
+    testClockFormat();
+    testAttract();
     std::printf("%d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }

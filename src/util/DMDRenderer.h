@@ -10,6 +10,7 @@
 #include "core/SceneRunner.h"
 #include "core/TextUtil.h"
 #include "matrix/Hub75_Matrix.h"
+#include "render/ClockScene.h"
 #include "render/FxScene.h"
 #include "render/TextScene.h"
 
@@ -43,6 +44,9 @@ public:
 
     // Animated effect (ESP32 extension): fx|... and msgfx|... commands, score celebrations.
     void renderFx(FxSpec spec, uint32_t holdMs = 0);
+
+    // Port of RunTime(): date and/or time for the configured durations.
+    void renderClock(ClockSpec spec, uint32_t holdMs = 0);
 
     // Celebrate special moves with an animation instead of plain text (default on).
     void setCelebrations(bool enabled) { _celebrations = enabled; }

@@ -9,13 +9,17 @@
 #include <string>
 #include <vector>
 
+#include "AttractController.h"
 #include "DMDRenderer.h"
+#include "TimeService.h"
 
 class MessageHandler {
 private:
     using Handler = std::function<void(const std::vector<std::string>&)>;
     std::map<std::string, Handler> handlers;
     DMDRenderer* dmdRenderer;
+    AttractController* attract;
+    TimeService* timeService;
     MessageHandler() = delete;
     void setupHandlers();
     void notPortedYet(const char* action, const char* phase);
@@ -26,7 +30,7 @@ private:
     static uint32_t holdArg(const std::vector<std::string>& params, size_t i);
 
 public:
-    explicit MessageHandler(DMDRenderer* renderer);
+    MessageHandler(DMDRenderer* renderer, AttractController* attract, TimeService* timeService);
     void handleMessage(const std::string& message);
 };
 #endif

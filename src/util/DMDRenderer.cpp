@@ -95,6 +95,10 @@ void DMDRenderer::renderFx(FxSpec spec, uint32_t holdMs) {
     _runner.enqueue(std::unique_ptr<dmd::Scene>(new FxScene(*_dmd, std::move(spec))), holdMs);
 }
 
+void DMDRenderer::renderClock(ClockSpec spec, uint32_t holdMs) {
+    _runner.enqueue(std::unique_ptr<dmd::Scene>(new ClockScene(*_dmd, std::move(spec))), holdMs);
+}
+
 void DMDRenderer::renderStatus(const std::string& text) {
     _runner.reset();
     renderText(text);
