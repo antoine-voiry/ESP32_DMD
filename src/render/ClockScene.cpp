@@ -7,6 +7,7 @@
 
 #include "TextImage.h"
 #include "core/Clock.h"
+#include "util/Storage.h"
 
 namespace {
 
@@ -64,7 +65,15 @@ void ClockScene::draw(const std::string& text) {
 
     const uint16_t fg = _matrix.color(_spec.fg.r, _spec.fg.g, _spec.fg.b);
     const uint16_t shadow = _matrix.color(_spec.shadow.r, _spec.shadow.g, _spec.shadow.b);
-    _matrix.fillScreen(0);
+    if (_background) {
+        for (int y = 0; y < h && y < _background->h; ++y) {
+            for (int x = 0; x < w && x < _background->w; ++x) {
+                _matrix.drawPixel(x, y, _background->px[static_cast<size_t>(y) * _background->w + x]);
+            }
+        }
+    } else {
+        _matrix.fillScreen(0);
+    }
     if (_image) {
         // Shadow first, offset by one pixel, then the text itself.
         for (int y = 0; y < h; ++y) {
@@ -85,6 +94,9 @@ void ClockScene::draw(const std::string& text) {
 void ClockScene::start(uint32_t nowMs) {
     _startMs = nowMs;
     _lastCheckMs = nowMs;
+    if (!_spec.pattern.empty() && storageExists(_spec.pattern)) {
+        _background = loadPng(_spec.pattern, _matrix.width(), _matrix.height(), true);
+    }
     draw(currentText(showingDate(0)));
 }
 

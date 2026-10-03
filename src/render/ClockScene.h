@@ -2,11 +2,12 @@
 #define DMD_RENDER_CLOCK_SCENE_H
 
 // Port of DMDRenderer.RunTime(): shows the date and/or the time for a fixed duration.
-// The background pattern (ClockRenderer.clockBackgroundImage) needs PNG support (phase 3).
+// The background is ClockRenderer.clockBackgroundImage from /patterns (black when missing).
 
 #include <memory>
 #include <string>
 
+#include "Bitmap.h"
 #include "core/SceneRunner.h"
 #include "core/TextUtil.h"
 #include "matrix/Hub75_Matrix.h"
@@ -23,6 +24,7 @@ struct ClockSpec {
     dmd::Rgb fg{0, 0, 255};     // defaultfontcolor_clock
     dmd::Rgb shadow{255, 0, 0}; // defaultfontcolor_clockshadow
     int maxFontPx = 32;
+    std::string pattern;        // PNG path, e.g. /patterns/OldGame.png ("" = none)
 };
 
 class ClockScene : public dmd::Scene {
@@ -44,6 +46,7 @@ private:
     Hub75_Matrix& _matrix;
     ClockSpec _spec;
     std::unique_ptr<GFXcanvas1> _image;
+    std::shared_ptr<Bitmap565> _background;
     std::string _shown;
     uint32_t _startMs = 0;
     uint32_t _lastCheckMs = 0;

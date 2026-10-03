@@ -12,10 +12,11 @@
 #include "core/Fx.h"
 
 class DMDRenderer;
+class MediaLibrary;
 
 class AttractController {
 public:
-    explicit AttractController(DMDRenderer* renderer);
+    AttractController(DMDRenderer* renderer, MediaLibrary* media);
 
     // waiter|start: play Running.scrollOrder. msgcarrou|start: play the carousel only ("4").
     void start(const std::string& codes);
@@ -28,14 +29,16 @@ public:
 
     void loop(uint32_t nowMs);
 
-    // Show codes this port can play: T clock, 4 text carousel, F random effect (ESP32 extension).
-    static constexpr const char* kSupportedCodes = "T4F";
+    // Show codes this port can play: 1 random GIF, 2 random image, T clock, 4 text carousel,
+    // F random effect (ESP32 extension).
+    static constexpr const char* kSupportedCodes = "12T4F";
 
 private:
     bool play(char code);
     bool playCarousel();
 
     DMDRenderer* _renderer;
+    MediaLibrary* _media;
     std::unique_ptr<dmd::AttractPlaylist> _playlist;
     dmd::IdleTimer _idle;
     dmd::Rng _rng;

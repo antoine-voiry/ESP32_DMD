@@ -2,6 +2,7 @@
 
 #include "ConfigHelper.h"
 #include "core/Clock.h"
+#include "core/Media.h"
 #include "core/TextUtil.h"
 
 namespace settings {
@@ -34,6 +35,8 @@ ClockSpec clockSpec() {
     spec.fg = rgbSetting("ClockRenderer", "defaultfontcolor_clock", dmd::Rgb{0, 0, 255});
     spec.shadow = rgbSetting("ClockRenderer", "defaultfontcolor_clockshadow", dmd::Rgb{255, 0, 0});
     spec.maxFontPx = static_cast<int>(intSetting("TextRenderer", "maxfontsize", 32));
+    const std::string pattern = strSetting("ClockRenderer", "clockBackgroundImage", "OldGame.png");
+    spec.pattern = pattern.empty() ? "" : std::string(dmd::media::kPatterns) + "/" + pattern;
     return spec;
 }
 
@@ -49,6 +52,10 @@ TextStyle textStyle() {
     style.maxCharsPerLine = maxChars > 0 ? static_cast<size_t>(maxChars) : 22;
     style.maxFontPx = static_cast<int>(intSetting("TextRenderer", "maxfontsize", 32));
     return style;
+}
+
+bool centerImages() {
+    return intSetting("DMDRenderer", "center_images", 1) != 0;
 }
 
 std::string scrollOrder() {

@@ -12,7 +12,10 @@
 #include "matrix/Hub75_Matrix.h"
 #include "render/ClockScene.h"
 #include "render/FxScene.h"
+#include "render/MediaScenes.h"
 #include "render/TextScene.h"
+
+class MediaLibrary;
 
 struct TextRequest {
     std::string text;
@@ -45,6 +48,15 @@ public:
     // Animated effect (ESP32 extension): fx|... and msgfx|... commands, score celebrations.
     void renderFx(FxSpec spec, uint32_t holdMs = 0);
 
+    // Port of RenderGif() / RenderGifWithText(): plays an already resolved GIF once, optional text on top.
+    void renderGif(const std::string& path, uint32_t holdMs = 0, const std::string& text = "");
+    // Port of RenderImage() / msgimg: shows an already resolved PNG, optional text on top.
+    void renderImage(const std::string& path, uint32_t holdMs = 0, const std::string& text = "");
+
+    // Score and special-move animations come from here (optional).
+    void setMediaLibrary(MediaLibrary* media) { _media = media; }
+    void setCenterImages(bool center) { _centerImages = center; }
+
     // Port of RunTime(): date and/or time for the configured durations.
     void renderClock(ClockSpec spec, uint32_t holdMs = 0);
 
@@ -67,6 +79,8 @@ private:
     dmd::SceneRunner _runner;
     TextStyle _defaults;
     bool _celebrations = true;
+    bool _centerImages = true;
+    MediaLibrary* _media = nullptr;
 };
 
 #endif

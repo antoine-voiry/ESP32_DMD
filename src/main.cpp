@@ -10,6 +10,9 @@
 #include "util/MessageFilter.h"
 #include "util/LocalWebServer.h"
 #include "util/AttractController.h"
+#include "util/MediaLibrary.h"
+#include "util/Storage.h"
+#include "core/Media.h"
 #include "util/Settings.h"
 #include "util/TimeService.h"
 #include "matrix/Hub75_Matrix.h"
@@ -28,6 +31,7 @@ MessageFilter* messageFilter = nullptr;
 
 MQTTHelper* mqttClient= nullptr; 
 TimeService timeService;
+MediaLibrary mediaLibrary;
 AttractController* attract = nullptr;
 LocalWebServer* webServer = nullptr;
 
@@ -145,10 +149,14 @@ void setup() {
     dmdRenderer = new DMDRenderer(matrix);
     dmdRenderer->setBrightnessPercent(ConfigHelper::getInstance().getBrightness());
     dmdRenderer->defaultStyle() = settings::textStyle();
+    storageBegin();
+    mediaLibrary.begin();
+    dmdRenderer->setMediaLibrary(&mediaLibrary);
+    dmdRenderer->setCenterImages(settings::centerImages());
     timeService.begin(settings::timezone());
-    attract = new AttractController(dmdRenderer);
+    attract = new AttractController(dmdRenderer, &mediaLibrary);
     attract->onMessage(millis());  // arms the Running.attract_mode countdown, as RenderFirstStart() did
-    messageHandler = new MessageHandler(dmdRenderer, attract, &timeService);
+    messageHandler = new MessageHandler(dmdRenderer, attract, &timeService, &mediaLibrary);
     messageFilter = new MessageFilter();
 
     // Port of RenderFirstStart(): tell the user where the web interface is.
@@ -157,6 +165,11 @@ void setup() {
     address.motion = dmd::Motion::Left;
     dmdRenderer->renderText("Web ok via", 1000);
     dmdRenderer->renderText(address);
+    // RenderFirstStart() ended on the Raspy2DMD logo.
+    const std::string logo = std::string(dmd::media::kImages) + "/Raspy2DMD.png";
+    if (storageExists(logo)) {
+        dmdRenderer->renderImage(logo);
+    }
 
     // Initialize web server
     webServer = new LocalWebServer();
