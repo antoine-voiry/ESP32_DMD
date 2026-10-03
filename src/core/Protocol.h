@@ -18,7 +18,7 @@ struct Command {
 // Splits a payload on '|'. Returns false if the payload has no '|' (the original rejects those).
 bool parseCommand(const std::string& payload, Command& out);
 
-// True if the action is one of the 33 actions Raspy2DMD accepts.
+// True if the action is one of the 33 actions Raspy2DMD accepts, or an ESP32 extension (fx, msgfx).
 bool isKnownAction(const std::string& action);
 
 // Minimum number of arguments the original dispatcher requires for an action (0 if none).

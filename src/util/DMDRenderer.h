@@ -10,6 +10,7 @@
 #include "core/SceneRunner.h"
 #include "core/TextUtil.h"
 #include "matrix/Hub75_Matrix.h"
+#include "render/FxScene.h"
 #include "render/TextScene.h"
 
 struct TextRequest {
@@ -40,6 +41,12 @@ public:
     // Port of RenderText(val=True): special move name (if any) for 2 s, then the darts.
     void renderScore(const std::string& score, uint32_t holdMs = 0);
 
+    // Animated effect (ESP32 extension): fx|... and msgfx|... commands, score celebrations.
+    void renderFx(FxSpec spec, uint32_t holdMs = 0);
+
+    // Celebrate special moves with an animation instead of plain text (default on).
+    void setCelebrations(bool enabled) { _celebrations = enabled; }
+
     // Status line shown by the firmware itself (MQTT down, ...), replaces whatever is queued.
     void renderStatus(const std::string& text);
 
@@ -55,6 +62,7 @@ private:
     Hub75_Matrix* _dmd;
     dmd::SceneRunner _runner;
     TextStyle _defaults;
+    bool _celebrations = true;
 };
 
 #endif

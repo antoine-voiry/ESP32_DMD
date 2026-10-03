@@ -24,6 +24,8 @@ const ActionSpec kActions[] = {
     {"gifText", 2},    {"gifPath", 1},    {"img", 1},           {"time", 1},
     {"sound", 1},      {"effet", 1},      {"soundeffet", 3},    {"perf", 0},
     {"edfJoursTempo", 0},
+    // ESP32 extensions (not sent by Raspydarts): fx|name[|sec], msgfx|text|effect[|sec]
+    {"fx", 1},         {"msgfx", 2},
 };
 
 const ActionSpec* findAction(const std::string& action) {

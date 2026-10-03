@@ -1,6 +1,7 @@
 #include "DMDRenderer.h"
 
 #include <memory>
+#include <utility>
 
 #include "core/Protocol.h"
 #include "core/SpecialMoves.h"
@@ -10,6 +11,13 @@ static const char* TAG = "DMDRenderer";
 
 // RenderText(val=True) sleeps 2 s after showing a special move before showing the score.
 static constexpr uint32_t kSpecialMoveHoldMs = 2000;
+// Fireworks for the rarest moves.
+static constexpr uint32_t kBigCelebrationMs = 3500;
+
+static bool isBigMove(const std::string& move) {
+    return move == "MAXIMUM_TON_80" || move == "BLACK_HAT_THREE_IN_THE_BLACK" || move == "RED_HAT" ||
+           move == "HAT_TRICK" || move == "CHAMPAGNE_BREAKFAST";
+}
 
 DMDRenderer::DMDRenderer(Hub75_Matrix* matrix) : _dmd(matrix) {
     ESP_LOGI(TAG, "Initializing DMDRenderer");
@@ -51,16 +59,40 @@ void DMDRenderer::renderScore(const std::string& score, uint32_t holdMs) {
     }
     // TODO(phase 3): play a random GIF from Scores/<last dart> and SpecialsMoves/<move> when present.
     if (!hasMiss) {
-        std::string move = dmd::findSpecialMove(darts);
+        const std::string move = dmd::findSpecialMove(darts);
         if (!move.empty()) {
-            for (auto& c : move) {
+            std::string label = move;
+            for (auto& c : label) {
                 if (c == '_') c = ' ';
             }
             ESP_LOGI(TAG, "Special move: %s", move.c_str());
-            renderText(move, kSpecialMoveHoldMs);
+            if (!_celebrations) {
+                renderText(label, kSpecialMoveHoldMs);
+            } else {
+                FxSpec fx;
+                fx.text = label;
+                fx.fg = _defaults.fg;
+                fx.maxCharsPerLine = _defaults.maxCharsPerLine;
+                fx.maxFontPx = _defaults.maxFontPx;
+                if (isBigMove(move)) {
+                    fx.background = dmd::FxBackground::Fireworks;
+                    fx.textFx = dmd::FxText::Rainbow;
+                    fx.durationMs = kBigCelebrationMs;
+                } else {
+                    fx.textFx = dmd::FxText::Sparkle;
+                    fx.durationMs = kSpecialMoveHoldMs;
+                }
+                renderFx(fx);
+            }
         }
     }
     renderText(upper, holdMs);
+}
+
+void DMDRenderer::renderFx(FxSpec spec, uint32_t holdMs) {
+    ESP_LOGD(TAG, "Queue effect (%u ms, hold %u ms)", static_cast<unsigned>(spec.durationMs),
+             static_cast<unsigned>(holdMs));
+    _runner.enqueue(std::unique_ptr<dmd::Scene>(new FxScene(*_dmd, std::move(spec))), holdMs);
 }
 
 void DMDRenderer::renderStatus(const std::string& text) {

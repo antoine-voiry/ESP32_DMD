@@ -1,86 +1,19 @@
 #include "TextScene.h"
 
 #include <Adafruit_GFX.h>
-#include <Fonts/FreeSansBold12pt7b.h>
-#include <Fonts/FreeSansBold18pt7b.h>
-#include <Fonts/FreeSansBold9pt7b.h>
 #include <esp_log.h>
 
 #include <algorithm>
 #include <cmath>
-#include <vector>
+
+#include "TextImage.h"
 
 static const char* TAG = "TextScene";
 
 namespace {
 
-// Largest first. The original shrinks a TrueType font (Impact by default) until the text fits;
-// here we pick the first bitmap font that fits. nullptr is the built-in 6x8 font, scaled by size.
-struct FontChoice {
-    const GFXfont* font;
-    uint8_t size;
-};
-
-const FontChoice kFonts[] = {
-    {&FreeSansBold18pt7b, 1},
-    {&FreeSansBold12pt7b, 1},
-    {&FreeSansBold9pt7b, 1},
-    {nullptr, 2},
-    {nullptr, 1},
-};
-constexpr size_t kFontCount = sizeof(kFonts) / sizeof(kFonts[0]);
-
-// Widest text image we allocate for left/right scrolls (1 bit per pixel: 4096x32 = 16 KB).
-constexpr int kMaxScrollWidth = 4096;
 // After a stall longer than this, resume the animation instead of fast-forwarding through it.
 constexpr int32_t kMaxCatchUpMs = 250;
-
-struct LineMetrics {
-    int height;  // pixel height of a line of text
-    int top;     // y1 of the text bounds relative to the cursor (negative for baseline fonts)
-};
-
-// Small canvas used only to measure text; getTextBounds does not touch the pixel buffer.
-GFXcanvas1& measurer() {
-    static GFXcanvas1 canvas(8, 8);
-    return canvas;
-}
-
-void applyFont(Adafruit_GFX& gfx, const FontChoice& choice) {
-    gfx.setFont(choice.font);
-    gfx.setTextSize(choice.size);
-    gfx.setTextWrap(false);
-}
-
-int textWidth(const FontChoice& choice, const std::string& s) {
-    if (s.empty()) {
-        return 0;
-    }
-    GFXcanvas1& m = measurer();
-    applyFont(m, choice);
-    int16_t x1 = 0, y1 = 0;
-    uint16_t w = 0, h = 0;
-    m.getTextBounds(s.c_str(), 0, 0, &x1, &y1, &w, &h);
-    return static_cast<int>(w);
-}
-
-int textLeft(const FontChoice& choice, const std::string& s) {
-    GFXcanvas1& m = measurer();
-    applyFont(m, choice);
-    int16_t x1 = 0, y1 = 0;
-    uint16_t w = 0, h = 0;
-    m.getTextBounds(s.c_str(), 0, 0, &x1, &y1, &w, &h);
-    return x1;
-}
-
-LineMetrics lineMetrics(const FontChoice& choice) {
-    GFXcanvas1& m = measurer();
-    applyFont(m, choice);
-    int16_t x1 = 0, y1 = 0;
-    uint16_t w = 0, h = 0;
-    m.getTextBounds("AQgjy", 0, 0, &x1, &y1, &w, &h);
-    return {static_cast<int>(h), static_cast<int>(y1)};
-}
 
 bool reached(uint32_t now, uint32_t deadline) {
     return static_cast<int32_t>(now - deadline) >= 0;
@@ -96,75 +29,22 @@ TextScene::~TextScene() = default;
 void TextScene::render() {
     const int dispW = _matrix.width();
     const int dispH = _matrix.height();
-    const bool horizontal = dmd::isHorizontalScroll(_style.motion);
-
-    // Pick the font: the largest one whose lines fit the panel.
-    size_t fontIndex = kFontCount - 1;
-    std::vector<std::string> lines;
-    std::string single = _text;
-    if (horizontal) {
+    TextLayoutOptions options;
+    options.singleLine = dmd::isHorizontalScroll(_style.motion);
+    options.maxCharsPerLine = _style.maxCharsPerLine;
+    options.maxFontPx = _style.maxFontPx;
+    std::string text = _text;
+    if (options.singleLine) {
         // The original pads with a space on the side the text enters from.
-        single = _style.motion == dmd::Motion::Right ? " " + _text : _text + " ";
+        text = _style.motion == dmd::Motion::Right ? " " + _text : _text + " ";
     }
-    for (size_t i = 0; i < kFontCount; ++i) {
-        const LineMetrics lm = lineMetrics(kFonts[i]);
-        const bool last = i + 1 == kFontCount;
-        if (lm.height > _style.maxFontPx && !last) {
-            continue;
-        }
-        if (horizontal) {
-            if (lm.height <= dispH || last) {
-                fontIndex = i;
-                break;
-            }
-            continue;
-        }
-        auto measure = [&](const std::string& s) { return textWidth(kFonts[i], s); };
-        std::vector<std::string> candidate = dmd::wrapText(_text, dispW, _style.maxCharsPerLine, measure);
-        if (static_cast<int>(candidate.size()) * lm.height <= dispH || last) {
-            fontIndex = i;
-            lines = candidate;
-            break;
-        }
-    }
-    const FontChoice& font = kFonts[fontIndex];
-    const LineMetrics lm = lineMetrics(font);
-
-    int imgW = dispW;
-    if (horizontal) {
-        lines = {single};
-        imgW = textWidth(font, single);
-        if (imgW < 1) imgW = 1;
-        if (imgW > kMaxScrollWidth) {
-            ESP_LOGW(TAG, "Text too long to scroll (%d px), truncating to %d px", imgW, kMaxScrollWidth);
-            imgW = kMaxScrollWidth;
-        }
-    }
-    const int imgH = dispH;
-
-    _image.reset(new GFXcanvas1(imgW, imgH));
-    if (!_image->getBuffer()) {
-        ESP_LOGE(TAG, "Out of memory for a %dx%d text image", imgW, imgH);
-        _image.reset();
+    _image = renderTextImage(text, dispW, dispH, options);
+    if (!_image) {
+        ESP_LOGE(TAG, "No image for '%s'", _text.c_str());
         return;
     }
-    _image->fillScreen(0);
-    applyFont(*_image, font);
-    _image->setTextColor(1);
-
-    // Vertically centre the block of lines; centre each line horizontally (left-align scrolls).
-    int y = (imgH - static_cast<int>(lines.size()) * lm.height) / 2;
-    for (const auto& line : lines) {
-        const int w = textWidth(font, line);
-        const int x = horizontal ? 0 : (imgW - w) / 2;
-        _image->setCursor(x - textLeft(font, line), y - lm.top);
-        _image->print(line.c_str());
-        y += lm.height;
-    }
-    ESP_LOGD(TAG, "Rendered '%s' in font %u, %u line(s), image %dx%d", _text.c_str(),
-             static_cast<unsigned>(fontIndex), static_cast<unsigned>(lines.size()), imgW, imgH);
-
-    _timeline.reset(new dmd::Timeline(_style.motion, imgW, imgH, dispW, dispH, _style.iterations));
+    _timeline.reset(new dmd::Timeline(_style.motion, _image->width(), _image->height(), dispW, dispH,
+                                      _style.iterations));
 }
 
 void TextScene::drawFrame(const dmd::Frame& f) {

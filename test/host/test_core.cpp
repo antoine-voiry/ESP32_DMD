@@ -1,9 +1,11 @@
 // Host-side unit tests for src/core (no Arduino needed). Run: make -C test/host
+#include <algorithm>
 #include <cstdio>
 #include <memory>
 #include <string>
 #include <vector>
 
+#include "core/Fx.h"
 #include "core/Motion.h"
 #include "core/Protocol.h"
 #include "core/SceneRunner.h"
@@ -226,6 +228,91 @@ static void testSceneRunner() {
     CHECK_EQ(log.size(), 2u);
 }
 
+static void testFx() {
+    FxBackground bg;
+    CHECK(parseFxBackground("fireworks", bg) && bg == FxBackground::Fireworks);
+    CHECK(!parseFxBackground("rainbow", bg));
+    FxText tf;
+    CHECK(parseFxText("typewriter", tf) && tf == FxText::Typewriter);
+    CHECK(!parseFxText("plasma", tf));
+    CHECK(isAcceptedPayload("fx|plasma"));
+    CHECK(isAcceptedPayload("msgfx|Hello|rainbow|3"));
+    CHECK_EQ(minArgs("msgfx"), 2u);
+
+    Rgb red = hsv(0);
+    CHECK(red.r == 255 && red.g == 0 && red.b == 0);
+    Rgb gray = hsv(100, 0, 200);
+    CHECK(gray.r == 200 && gray.g == 200 && gray.b == 200);
+    CHECK_EQ(sin8(0), 128);
+    CHECK_EQ(sin8(64), 255);
+    CHECK_EQ(sin8(192), 0);
+    Rgb half = scale(Rgb{200, 100, 0}, 128);
+    CHECK(half.r == 100 && half.g == 50 && half.b == 0);
+
+    CHECK_EQ(typewriterColumns(0, 18, 64), 0);
+    CHECK_EQ(typewriterColumns(180, 18, 64), 10);
+    CHECK_EQ(typewriterColumns(100000, 18, 64), 64);
+    for (int x = 0; x < 64; ++x) {
+        int o = waveOffset(x, 1234, 2);
+        CHECK(o >= -2 && o <= 2);
+    }
+
+    Rng a(42), b(42);
+    for (int i = 0; i < 100; ++i) {
+        CHECK_EQ(a.next(), b.next());
+        int r = a.range(-3, 3);
+        b.range(-3, 3);
+        CHECK(r >= -3 && r <= 3);
+    }
+    CHECK(Rng(0).next() != 0);  // a zero seed would get stuck at 0
+}
+
+static void testFireworks() {
+    Fireworks fw(64, 32, 7);
+    bool sawRocket = false, sawSpark = false;
+    size_t maxCount = 0;
+    for (int t = 0; t < 20000; t += 33) {
+        fw.step(33);
+        for (const auto& p : fw.particles()) {
+            sawRocket |= p.rocket;
+            sawSpark |= !p.rocket;
+            CHECK(p.y <= 34.0f);  // offscreen particles are removed
+        }
+        maxCount = std::max(maxCount, fw.particles().size());
+    }
+    CHECK(sawRocket);
+    CHECK(sawSpark);
+    CHECK(maxCount <= Fireworks::kMaxParticles);
+
+    Fireworks::Particle p{};
+    p.maxLifeMs = 1000;
+    p.lifeMs = 500;
+    CHECK_EQ(Fireworks::level(p), 127);
+}
+
+static void testStarsAndRain() {
+    Starfield sf(64, 32, 40, 9);
+    for (int i = 0; i < 500; ++i) {
+        sf.step(33);
+        for (const auto& s : sf.stars()) {
+            CHECK(s.x >= 0.0f && s.x < 64.0f && s.y >= 0 && s.y < 32);
+        }
+    }
+    MatrixRain rain(64, 32, 11);
+    bool lit = false;
+    for (int i = 0; i < 300; ++i) {
+        rain.step(33);
+        for (int x = 0; x < 64; ++x) {
+            for (int y = 0; y < 32; ++y) {
+                lit |= rain.level(x, y) > 0;
+            }
+        }
+    }
+    CHECK(lit);
+    CHECK_EQ(rain.level(-1, 0), 0);
+    CHECK_EQ(rain.level(64, 0), 0);
+}
+
 int main() {
     testParseCommand();
     testFilter();
@@ -235,6 +322,9 @@ int main() {
     testWrap();
     testTimeline();
     testSceneRunner();
+    testFx();
+    testFireworks();
+    testStarsAndRain();
     std::printf("%d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }

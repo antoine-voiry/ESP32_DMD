@@ -43,6 +43,18 @@ A valid payload interrupts the animation on screen, even if its arguments turn o
 
 `sens`: `left`, `right`, `up`, `down`, `rotate`, `antirotate`, `flip`, `twirl`.
 
+## ESP32 extensions
+
+Not part of Raspy2DMD (Raspydarts never sends them), handy from `mosquitto_pub` or Home Assistant.
+
+| Command | Arguments | Effect |
+|---|---|---|
+| `fx` | `plasma\|fireworks\|stars\|matrix[\|seconds]` | Full-panel animation (default 5 s, max 10 min) |
+| `msgfx` | `text\|effect[\|seconds]` | Text effect: `solid`, `rainbow`, `wave`, `typewriter`, `sparkle`; or a background name for rainbow text over that animation |
+
+Special moves in `score` are celebrated: fireworks with rainbow text for `MAXIMUM_TON_80`, `BLACK_HAT…`, `RED_HAT`,
+`HAT_TRICK` and `CHAMPAGNE_BREAKFAST`; sparkling text for the others (same 2 s as the original's plain text).
+
 ## Differences from the original
 
 - Fonts: Adafruit GFX bitmap fonts (FreeSansBold 18/12/9 pt, then the built-in 6x8 font at x2 and x1),

@@ -3,6 +3,7 @@
 #include <esp_sleep.h>
 
 #include "ConfigHelper.h"
+#include "core/Fx.h"
 #include "core/Protocol.h"
 #include "esp_log.h"
 
@@ -11,6 +12,14 @@ static const char* TAG = "MessageHandler";
 MessageHandler::MessageHandler(DMDRenderer* renderer) : dmdRenderer(renderer) {
     ESP_LOGI(TAG, "Initializing MessageHandler");
     setupHandlers();
+}
+
+uint32_t MessageHandler::effectDuration(const std::vector<std::string>& params, size_t i) {
+    constexpr uint32_t kDefaultMs = 5000;
+    constexpr uint32_t kMaxMs = 10u * 60u * 1000u;  // a stuck "fx|plasma|99999" would block the queue
+    uint32_t ms = holdArg(params, i);
+    if (ms == 0) return kDefaultMs;
+    return ms > kMaxMs ? kMaxMs : ms;
 }
 
 uint32_t MessageHandler::holdArg(const std::vector<std::string>& params, size_t i) {
@@ -107,6 +116,38 @@ void MessageHandler::setupHandlers() {
         } else {
             notPortedYet("soundeffet without text", "phase 3, media");
         }
+    };
+
+    ////////////////////////////////////////////////////////////////////////////
+    // ESP32 extensions (Raspydarts never sends these; handy from mosquitto_pub or Home Assistant)
+
+    // fx|plasma|5   backgrounds: plasma, fireworks, stars, matrix
+    handlers["fx"] = [this](const std::vector<std::string>& params) {
+        FxSpec fx;
+        if (!dmd::parseFxBackground(params[0], fx.background)) {
+            ESP_LOGW(TAG, "fx: unknown effect '%s' (plasma, fireworks, stars, matrix)", params[0].c_str());
+            return;
+        }
+        fx.durationMs = effectDuration(params, 1);
+        dmdRenderer->renderFx(fx);
+    };
+
+    // msgfx|Hello|rainbow|5   text effects: solid, rainbow, wave, typewriter, sparkle;
+    // a background name (plasma, fireworks, stars, matrix) shows rainbow text over it.
+    handlers["msgfx"] = [this](const std::vector<std::string>& params) {
+        FxSpec fx;
+        fx.text = params[0].empty() ? "-Vide-" : params[0];
+        fx.fg = dmdRenderer->defaultStyle().fg;
+        fx.maxCharsPerLine = dmdRenderer->defaultStyle().maxCharsPerLine;
+        fx.maxFontPx = dmdRenderer->defaultStyle().maxFontPx;
+        if (dmd::parseFxBackground(params[1], fx.background)) {
+            fx.textFx = dmd::FxText::Rainbow;
+        } else if (!dmd::parseFxText(params[1], fx.textFx)) {
+            ESP_LOGW(TAG, "msgfx: unknown effect '%s'", params[1].c_str());
+            return;
+        }
+        fx.durationMs = effectDuration(params, 2);
+        dmdRenderer->renderFx(fx);
     };
 
     handlers["sound"] = [](const std::vector<std::string>&) {
