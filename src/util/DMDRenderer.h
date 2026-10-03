@@ -5,6 +5,7 @@
 #include <vector>
 #include <Arduino.h>
 #include "matrix/Hub75_Matrix.h"
+#define DELAY_CRITICAL_MSG 8000
 class DMDRenderer {
 private:
     bool standalone;
@@ -13,6 +14,8 @@ private:
     // For example: DMD dmd;
     Hub75_Matrix* _dmd = nullptr; // Pointer to the matrix object
     DMDRenderer() = delete; // Prevent default constructor
+    std::string last_action_text;
+    std::string last_action_name;
 
 public:
     DMDRenderer(Hub75_Matrix* matrix);
@@ -20,13 +23,15 @@ public:
 
     // Basic rendering methods
     void renderText(const std::string& text);
-    void renderText(const std::string& text, bool val);
-    void renderText(const std::string& text, const std::string& sens, int iterate, bool val , const std::string& fontName );
+    void renderText(const std::string& text, bool isDartScore);
+    void renderText(const std::string& text, const std::string& sens, int iterate, bool isDartScore , const std::string& fontName );
     void renderGif(const std::string& gifPath , bool aleatoire );
     void renderImage(const std::string& imagePath , bool aleatoire);
     void renderTime(const std::string& command, int only = 0);
+    void renderScore(const std::string& score);
     void renderCarrousel();
     void renderTime(bool startOrStopTime);
+    void swapBuffers(bool copy = false);
     void update();
     
     // Config and status methods

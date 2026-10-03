@@ -2,6 +2,7 @@
 #include <ESP32-HUB75-MatrixPanel-I2S-DMA.h>
 #include <esp_log.h>
 
+
 static const char* TAG = "Hub75_Matrix";
 
 Hub75_Matrix::Hub75_Matrix() {
@@ -18,6 +19,7 @@ Hub75_Matrix::Hub75_Matrix() {
   
     _ledbuff = (CRGB *)malloc(_num_leds * sizeof(CRGB));  // allocate buffer for some tests
     buffclear(_ledbuff);  
+    _matrix->fillScreen(_matrix->color444(0, 100, 0));    
     // draw a blue circle
     _matrix->drawCircle(10, 10, 10, _matrix->color444(0, 0, 15));
     delay(500);
@@ -25,6 +27,11 @@ Hub75_Matrix::Hub75_Matrix() {
     // fill a violet circle
     _matrix->fillCircle(40, 21, 10, _matrix->color444(15, 0, 15));
     delay(500);
+    _matrix->fillTriangle(10, 10, 20, 20, 30, 10, _matrix->color444(55, 0, 0));
+    _matrix->flipDMABuffer();
+    delay(500);
+
+
 
     // fill the screen with 'black'
     _matrix->fillScreen(_matrix->color444(0, 0, 0));    
@@ -73,19 +80,40 @@ void Hub75_Matrix::buffclear(CRGB *buf){
  * @note The text is drawn at the position (5, 5)
  *  with a between each character defined by the size (1 pixel of 1, 2 for 2, etc...). 
  */
-void Hub75_Matrix::drawTextRandomColor(int colorWheelOffset, const char *str, int size){
+void Hub75_Matrix::drawCenteredTextRandomColor(int colorWheelOffset, const char *str, int size){
     // draw some text
-    //Desired text size. 1 is default 6x8, 2 is 12x16, 3 is 18x24, etc
-    _matrix->setTextSize(size);     // size 1 == 8 pixels high
-    _matrix->setTextWrap(false); // Don't wrap at end of line - will do ourselves
-  
-    _matrix->setCursor(5, 5);    // start at top left, with 5,5 pixel of spacing
-    uint8_t w = 0;
+    //Desired font size is 3x3 if using Tiny3x3a2pt7b
+    //position is center x and y
+    // space are 1 pixel
+    // the font can grow up to size multiplied by 3
+    int16_t x1, y1;
+    uint16_t w, h;
+    _matrix->setFont();
+    _matrix->setTextSize(size);     // size 1 == 8 pixels high 
+    _matrix->setTextWrap(false); // Don't wrap at end of line - will do ourselves   
+
+    _matrix->getTextBounds(str, 0, 0, &x1, &y1, &w, &h);
     
-    for (w=0; w<strlen(str); w++) {
-      _matrix->setTextColor(colorWheel((w*32)+colorWheelOffset));
-      _matrix->print(str[w]);
-    }
+    int16_t x = 0;
+    int16_t y = 0;
+    // // Calculate centered position
+    // if (w < _panel_width) {
+    //     x = (_panel_width - w * size) / 2;
+    // }
+    // if (h < _panel_height) {
+    //     y = (_panel_height - h * size) / 2;
+    // }
+    // Handle text that's too wide or tall for the display
+    // If the text is too wide we'll have to move the text left to right
+    // and then back to the left
+    // if the text is too high we'll have to move the text up and down
+    // and then back to the top
+    // we'll wait for 1 second before moving the text
+    // Handle text that's too wide or tall for the display
+    // we'll do it 3 times
+
+    _matrix->setTextColor(colorWheel((w*32)+colorWheelOffset));
+    _matrix->print(str);
 }
 
 /**
@@ -100,6 +128,7 @@ void Hub75_Matrix::drawTextRandomColor(int colorWheelOffset, const char *str, in
  */
 void Hub75_Matrix::drawTextRandomColorAtPosition(int colorWheelOffset, int xposition, int yposition, const char *str, int size){
     // draw some text
+    _matrix->setFont();
     _matrix->setTextSize(size);     // size 1 == 8 pixels high
     _matrix->setTextWrap(false); // Don't wrap at end of line - will do ourselves
   
@@ -198,3 +227,14 @@ void Hub75_Matrix::clearScreen() {
         _matrix->flipDMABuffer();
     }
 }
+
+void Hub75_Matrix::testFontSize() {
+    _matrix->fillScreen(0);
+    _matrix->setTextSize(1);
+    _matrix->setTextColor(0xFFFF);
+    _matrix->setCursor(0, 0);
+    _matrix->print("X");  // Single character for measurement
+    
+    // Draw rectangle around character for measurement
+    _matrix->drawRect(0, 0, 6, 8, _matrix->color565(255, 0, 0));
+  }

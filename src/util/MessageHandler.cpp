@@ -3,6 +3,7 @@
 
 static const char* TAG = "MessageHandler";
 
+
 MessageHandler::MessageHandler(DMDRenderer* renderer) : dmdRenderer(renderer) {
     ESP_LOGI(TAG, "Initializing MessageHandler");
     setupHandlers();
@@ -13,14 +14,17 @@ void MessageHandler::setupHandlers() {
     // Initialize message handlers map
     handlers["rebt"] = [this](const std::vector<std::string>& params) {
         ESP_LOGW(TAG, "Reboot command received - not implemented for ESP32");
-        dmdRenderer->renderText("Reboot command received - not implemented for ESP32");
+        dmdRenderer->renderText("Rebooting!!!");
+        delay(DELAY_CRITICAL_MSG);
+        ESP.restart(); // Restart the ESP32
         // TODO: Implement proper ESP32 restart
     };
 
     handlers["shutdwn"] = [this](const std::vector<std::string>& params) {
         ESP_LOGW(TAG, "Shutdown command received - not implemented for ESP32");
         // TODO: Implement proper ESP32 shutdown
-        dmdRenderer->renderText("Shutdown command received - not implemented for ESP32");
+        dmdRenderer->renderText("Rebooting!!!");
+        delay(DELAY_CRITICAL_MSG);
     };
 
     handlers["excludeFolder"] = [this](const std::vector<std::string>& params) {
@@ -53,6 +57,7 @@ void MessageHandler::setupHandlers() {
         std::string text = params[0].empty() ? "-Vide-" : params[0];
         ESP_LOGI(TAG, "Rendering message: %s", text.c_str());
         dmdRenderer->renderText(text);
+        dmdRenderer->swapBuffers(true);
         if(params.size() > 1) {
             ESP_LOGE(TAG, "Delaying for %s seconds", params[1].c_str());
             delay(std::stoi(params[1]) * 1000);
@@ -65,7 +70,8 @@ void MessageHandler::setupHandlers() {
             throw std::runtime_error("Missing arguments for score");
         }
         ESP_LOGI(TAG, "Rendering score: %s", params[0].c_str());
-        dmdRenderer->renderText(params[0], true);
+        dmdRenderer->renderScore(params[0]);
+        dmdRenderer->swapBuffers(true);
         if(params.size() > 1) {
             ESP_LOGE(TAG, "Delaying for %s seconds", params[1].c_str());
             delay(std::stoi(params[1]) * 1000);
@@ -74,43 +80,61 @@ void MessageHandler::setupHandlers() {
     handlers["owmzc"] = [this](const std::vector<std::string>& params) { 
         ESP_LOGI(TAG, "OWMZC command received"); 
         // TODO: Implement Open Weather Map Zone Coverage
+        dmdRenderer->renderText("OWMZC command received");
+        dmdRenderer->swapBuffers(true);
     };
 
     handlers["fllcn"] = [this](const std::vector<std::string>& params) {
         ESP_LOGI(TAG, "FLLCN command received");
+        dmdRenderer->renderText("FLLCN command received");
+        dmdRenderer->swapBuffers(true);
         // TODO: Implement Fall/Winter seasonal change
     };
 
     handlers["meteo"] = [this](const std::vector<std::string>& params) {
         ESP_LOGI(TAG, "Meteo command received");
+        dmdRenderer->renderText("Meteo command received");
+        dmdRenderer->swapBuffers(true);
         // TODO: Implement weather display
     };
     handlers["meteoPrevi"] = [this](const std::vector<std::string>& params) {
-        ESP_LOGI(TAG, "Meteo forecast command received");
+        dmdRenderer->renderText("meteoPrevi command received");
         // TODO: Implement weather forecast display
     };
     handlers["receipconf"] = [this](const std::vector<std::string>& params) {
         ESP_LOGI(TAG, "Receipt configuration command received");
+        dmdRenderer->renderText("receipconf command received");
+        dmdRenderer->swapBuffers(true);
         // TODO: Implement configuration receipt handling
     };
     handlers["rldconf"] = [this](const std::vector<std::string>& params) {
         ESP_LOGI(TAG, "Reload configuration command received");
+        dmdRenderer->renderText("rldconf command received");
+        dmdRenderer->swapBuffers(true);        
         // TODO: Implement configuration reload
     };
     handlers["conf"] = [this](const std::vector<std::string>& params) {
         ESP_LOGI(TAG, "Configuration command received");
+        dmdRenderer->renderText("conf command received");
+        dmdRenderer->swapBuffers(true);                
         // TODO: Implement configuration handling
     };
     handlers["waiter"] = [this](const std::vector<std::string>& params) {
         ESP_LOGI(TAG, "Waiter command received");
+        dmdRenderer->renderText("waiter command received");
+        dmdRenderer->swapBuffers(true);                        
         // TODO: Implement waiter mode
     };
     handlers["msgmove"] = [this](const std::vector<std::string>& params) {
         ESP_LOGI(TAG, "Message move command received");
+        dmdRenderer->renderText("Message move  command received");
+        dmdRenderer->swapBuffers(true);                        
         // TODO: Implement moving message display
     };
     handlers["msgmovebcl"] = [this](const std::vector<std::string>& params) {
         ESP_LOGI(TAG, "Message move loop command received");
+        dmdRenderer->renderText("Message move loop command received");
+        dmdRenderer->swapBuffers(true);          
         // TODO: Implement looping message display
     };
     handlers["msgcarrou"] = [this](const std::vector<std::string>& params) {

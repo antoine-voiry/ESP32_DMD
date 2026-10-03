@@ -1,5 +1,6 @@
 #include "DMDRenderer.h"
 #include "esp_log.h"
+#include "Darthasciiart.h"
 
 // Define log tag for this class
 static const char* TAG = "DMDRenderer";
@@ -24,14 +25,14 @@ void DMDRenderer::renderText(const std::string& text) {
     }
     _dmd->clearScreen();
     ESP_LOGD(TAG, "Rendering text: %s", text.c_str());
-    _dmd->drawTextRandomColor(1, text.c_str(),1);
+    _dmd->drawCenteredTextRandomColor(1, text.c_str(),1);
 }
 
-//TODO: remove what val is used for
-void DMDRenderer::renderText(const std::string& text, bool val) {
-    ESP_LOGD(TAG, "Rendering text with val=%d: %s", val, text.c_str());
+//TODO: remove what isDartScore  is used for
+void DMDRenderer::renderText(const std::string& text, bool isDartScore) {
+    ESP_LOGD(TAG, "Rendering text with val=%d: %s", isDartScore, text.c_str());
     _dmd->clearScreen();
-    _dmd->drawTextRandomColor(1, text.c_str(),2);
+    _dmd->drawCenteredTextRandomColor(1, text.c_str(),1);
 }
 
 void DMDRenderer::stop(const std::string& message) {
@@ -81,8 +82,29 @@ bool DMDRenderer::scoreReceived(const std::string& score) {
 
 void DMDRenderer::exclude(bool isFolder, const std::string& name, const std::string& path) {
     ESP_LOGI(TAG, "Excluding %s: %s from path: %s", isFolder ? "folder" : "file", name.c_str(), path.c_str());
+    renderText("Excluding " + name);
+    delay(DELAY_CRITICAL_MSG);
 }
 
 void DMDRenderer::renderFirstStart() {
-    renderText("Welcome");
+    renderText(DART_ASCII_ART_LINE_0);
+    renderText(DART_ASCII_ART_LINE_1);
+    renderText(DART_ASCII_ART_LINE_2);
+    renderText(DART_ASCII_ART_LINE_3);
+    _dmd->swapBuffers(true);
+
+    delay(DELAY_CRITICAL_MSG);
+
+}
+
+void DMDRenderer::swapBuffers(bool copy) {
+    ESP_LOGI(TAG, "Swapping buffers");
+    _dmd->swapBuffers(copy);
+}
+
+void DMDRenderer::renderScore(const std::string& score) {
+    ESP_LOGI(TAG, "Rendering score: %s", score.c_str());
+    _dmd->clearScreen();
+    _dmd->drawCenteredTextRandomColor(1, score.c_str(),1);
+    delay(DELAY_CRITICAL_MSG);
 }
