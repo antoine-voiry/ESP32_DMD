@@ -6,10 +6,12 @@
 #include <vector>
 
 #include "core/Attract.h"
+#include "core/Canvas.h"
 #include "core/Clock.h"
 #include "core/Fx.h"
 #include "core/Media.h"
 #include "core/Motion.h"
+#include "core/Online.h"
 #include "core/Protocol.h"
 #include "core/SceneRunner.h"
 #include "core/SpecialMoves.h"
@@ -494,6 +496,163 @@ static void testFitAndUpload() {
     CHECK_EQ(htmlEscape("<a href='x'>&\"</a>"), std::string("&lt;a href=&#39;x&#39;&gt;&amp;&quot;&lt;/a&gt;"));
 }
 
+static void testCanvas() {
+    Canvas c(10, 6);
+    c.fillRect(-2, -2, 4, 4, 7);  // clipped
+    CHECK_EQ(c.count(7), 4);
+    c.clear();
+    c.drawLine(0, 0, 9, 5, 9);
+    CHECK_EQ(c.get(0, 0), 9);
+    CHECK_EQ(c.get(9, 5), 9);
+    c.clear();
+    c.drawRect(1, 1, 4, 3, 5);
+    CHECK_EQ(c.count(5), 10);
+    c.clear();
+    c.fillCircle(5, 3, 2, 3);
+    CHECK_EQ(c.get(5, 3), 3);
+    CHECK_EQ(c.get(0, 0), 0);
+    CHECK_EQ(c.get(-1, 0), 0);
+    Canvas src(3, 2);
+    src.fillRect(0, 0, 3, 2, 4);
+    src.set(1, 0, 0);
+    Canvas dst(4, 4);
+    dst.clear(1);
+    dst.blit(src, 2, 3, true, 0);  // clipped to 2x1, transparent pixel skipped
+    CHECK_EQ(dst.count(4), 1);
+    CHECK_EQ(dst.get(3, 3), 1);
+    CHECK_EQ(dst.get(2, 3), 4);
+    CHECK_EQ(rgb565(255, 255, 255), 0xFFFF);
+    CHECK_EQ(rgb565(255, 0, 0), 0xF800);
+}
+
+static void testOnlineUrls() {
+    OwmConfig c;
+    CHECK(!owmConfigured(c));
+    c.appid = "abc 123";
+    c.lat = "48.85";
+    c.lon = "2.35";
+    c.zipcode = "75001";
+    c.countrycode = "FR";
+    CHECK(owmConfigured(c));
+    CHECK_EQ(currentWeatherUrl(c),
+             std::string("https://api.openweathermap.org/data/2.5/weather?lat=48.85&lon=2.35&appid=abc%20123&units=metric&lang=fr"));
+    CHECK_EQ(forecastUrl(c), std::string("https://api.openweathermap.org/data/2.5/forecast?lat=48.85&lon=2.35&appid=abc%20123&units=metric&lang=fr"));
+    CHECK_EQ(zipGeocodingUrl(c), std::string("https://api.openweathermap.org/geo/1.0/zip?zip=75001,FR&appid=abc%20123"));
+    CHECK_EQ(tempoUrl("2026-10-03", "2026-10-04"),
+             std::string("https://www.api-couleur-tempo.fr/api/joursTempo?dateJour%5B%5D=2026-10-03&dateJour%5B%5D=2026-10-04"));
+    CHECK_EQ(urlEncode("a&b=c/é"), std::string("a%26b%3Dc%2F%C3%A9"));
+}
+
+static void testOnlineDates() {
+    CHECK_EQ(roundHalfEven(12.5), 12);
+    CHECK_EQ(roundHalfEven(13.5), 14);
+    CHECK_EQ(roundHalfEven(-0.5), 0);
+    CHECK_EQ(roundHalfEven(-1.5), -2);
+    CHECK_EQ(roundHalfEven(2.49), 2);
+    DateTime d;
+    d.year = 2026; d.month = 12; d.day = 31;
+    CHECK_EQ(isoDate(d, 1), std::string("2027-01-01"));
+    CHECK_EQ(isoDate(d, 0), std::string("2026-12-31"));
+    d.year = 2024; d.month = 2; d.day = 28;
+    CHECK_EQ(isoDate(d, 1), std::string("2024-02-29"));
+    d.year = 2024; d.month = 3; d.day = 1;
+    CHECK_EQ(isoDate(d, -1), std::string("2024-02-29"));
+    d.year = 2026; d.month = 1; d.day = 1;
+    CHECK_EQ(isoDate(d, -1), std::string("2025-12-31"));
+    d.year = 2026; d.month = 10; d.day = 3;
+    std::vector<std::string> dates = forecastDates(d, 3);
+    CHECK_EQ(dates.size(), 3u);
+    CHECK_EQ(dates[2], std::string("2026-10-05"));
+    CHECK_EQ(forecastDates(d, 0).size(), 1u);
+}
+
+static void testForecastPages() {
+    std::vector<ForecastItem> items;
+    const char* times[] = {"2026-10-03 12:00:00", "2026-10-03 15:00:00", "2026-10-03 18:00:00",
+                           "2026-10-03 21:00:00", "2026-10-04 00:00:00", "2026-10-04 03:00:00"};
+    float t = 10.5f;
+    for (const char* tm : times) {
+        ForecastItem it;
+        it.dtTxt = tm;
+        it.icon = "01d";
+        it.temp = t;
+        t += 1.0f;
+        items.push_back(it);
+    }
+    std::vector<ForecastPage> pages = forecastPages(items, {"2026-10-03"});
+    CHECK_EQ(pages.size(), 2u);  // 5 slots for the 3rd (midnight included), 4 per page
+    CHECK_EQ(pages[0].date, std::string("03/10"));
+    CHECK_EQ(pages[0].slots.size(), 4u);
+    CHECK_EQ(pages[0].slots[0].temp, 10);  // 10.5 -> 10 (half to even)
+    CHECK_EQ(pages[1].slots.size(), 1u);
+    CHECK_EQ(pages[1].slots[0].time, std::string("00:00"));
+    pages = forecastPages(items, {"2026-10-03", "2026-10-04"});
+    CHECK_EQ(pages.size(), 3u);
+    CHECK_EQ(pages[2].date, std::string("04/10"));
+    CHECK_EQ(pages[2].slots[0].time, std::string("03:00"));
+    CHECK(forecastPages(items, {"2026-11-01"}).empty());
+    // Midnight on the 1st belongs to the last day of the previous month.
+    ForecastItem m;
+    m.dtTxt = "2026-11-01 00:00:00";
+    m.icon = "10n";
+    CHECK_EQ(forecastPages({m}, {"2026-10-31"}).size(), 1u);
+}
+
+static void testOnlineFormatting() {
+    CHECK_EQ(toDisplayAscii(formatTemperature(12.4f)), std::string("12oC"));
+    CHECK_EQ(formatTemperature(-3.6f), std::string("-4\xC2\xB0" "C"));
+    CHECK_EQ(formatWind(5.0f, "metric"), std::string("18km/h"));
+    CHECK_EQ(formatWind(10.0f, "imperial"), std::string("10mph"));
+    CHECK_EQ(formatTempoDate("2026-10-03"), std::string("03/10/26"));
+    CHECK_EQ(formatTempoDate("bad"), std::string("bad"));
+    CHECK(weatherKind("01d") == WeatherKind::Clear);
+    CHECK(weatherKind("04n") == WeatherKind::Clouds);
+    CHECK(weatherKind("09d") == WeatherKind::Showers);
+    CHECK(weatherKind("11d") == WeatherKind::Thunder);
+    CHECK(weatherKind("50d") == WeatherKind::Mist);
+    CHECK(weatherKind("x") == WeatherKind::Unknown);
+    CHECK(isNightIcon("10n"));
+    CHECK(!isNightIcon("10d"));
+    CHECK_EQ(tempoLabel(3), std::string("ROUGE"));
+    CHECK(tempoColor(2).r == 255 && tempoColor(2).b == 255);
+    CHECK_EQ(tempoLabel(0), std::string("?"));
+}
+
+static void testOnlineDrawing() {
+    // Each icon draws something inside its box and nothing outside it.
+    const WeatherKind kinds[] = {WeatherKind::Clear, WeatherKind::FewClouds, WeatherKind::Clouds, WeatherKind::Showers,
+                                 WeatherKind::Rain, WeatherKind::Thunder, WeatherKind::Snow, WeatherKind::Mist,
+                                 WeatherKind::Unknown};
+    for (WeatherKind k : kinds) {
+        for (int night = 0; night < 2; ++night) {
+            Canvas c(64, 32);
+            drawWeatherIcon(c, k, night != 0, 20, 4, 24);
+            int inside = 0, outside = 0;
+            for (int y = 0; y < 32; ++y) {
+                for (int x = 0; x < 64; ++x) {
+                    if (!c.get(x, y)) continue;
+                    if (x >= 20 && x < 44 && y >= 1 && y < 31) ++inside; else ++outside;
+                }
+            }
+            CHECK(inside > 5);
+            CHECK_EQ(outside, 0);
+        }
+    }
+    Canvas sun(24, 24);
+    drawWeatherIcon(sun, WeatherKind::Clear, false, 0, 0, 24);
+    CHECK(sun.count(rgb565(255, 200, 0)) > 20);
+
+    int tx, ty;
+    windArrowTip(10, 10, 10, 0.0f, tx, ty);   // north wind blows south: tip below
+    CHECK(tx == 10 && ty == 15);
+    windArrowTip(10, 10, 10, 270.0f, tx, ty);  // west wind blows east: tip on the right
+    CHECK(tx == 15 && ty == 10);
+    Canvas a(21, 21);
+    drawWindArrow(a, 10, 10, 12, 90.0f, 1);
+    CHECK(a.get(4, 10) == 1);  // east wind: tip on the left
+    CHECK(a.count(1) > 10);
+}
+
 int main() {
     testParseCommand();
     testFilter();
@@ -512,6 +671,12 @@ int main() {
     testExclusions();
     testEffects();
     testFitAndUpload();
+    testCanvas();
+    testOnlineUrls();
+    testOnlineDates();
+    testForecastPages();
+    testOnlineFormatting();
+    testOnlineDrawing();
     std::printf("%d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }

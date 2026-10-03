@@ -16,6 +16,7 @@ Reference: Raspy2DMD 1.5.4.27 (`ServerRaspy2DMD.py`, `bin/DMDRenderer.py`, `bin/
 | `DMDRenderer_SpecialsMoves` | `core/SpecialMoves` |
 
 `src/core` has no Arduino dependency and is unit tested on the host: `make -C test/host`.
+The JSON parsers in `src/net` are tested with ArduinoJson: `make -C test/host json ARDUINOJSON=<ArduinoJson>/src` (CI does this).
 
 ## Commands
 
@@ -49,7 +50,11 @@ A valid payload interrupts the animation on screen, even if its arguments turn o
 | `demo` | `gif` | ✅ every GIF, each preceded by its name |
 | `effet` | `id` | ✅ from `/effets.txt` (`id\|name\|text\|gif\|sound` per line) instead of MariaDB |
 | `excludeFolder`, `excludeFile` | `name\|path` | ✅ toggles, saved in `/exclusions.txt` |
-| `meteo`, `meteoPrevi`, `owmzc`, `fllcn`, `edfJoursTempo`, `perf` | | ⏳ phase 4 |
+| `meteo` | – | ✅ current weather: icon, temperature, wind arrow and speed |
+| `meteoPrevi` | – | ✅ forecast for `prevision` days, one page per day (2 slots per page on 64 px, 4 on 128 px) |
+| `edfJoursTempo` | – | ✅ today's and tomorrow's Tempo colour (api-couleur-tempo.fr) |
+| `owmzc`, `fllcn` | – | ✅ zip code → city name, lat, lon (stored in `OpenWeatherMap`) |
+| `perf` | – | ✅ board status: temperature, CPU MHz, free RAM, uptime, Wi-Fi signal and IP |
 | `receipconf` | | ⏳ phase 5 |
 
 `sens`: `left`, `right`, `up`, `down`, `rotate`, `antirotate`, `flip`, `twirl`.
@@ -57,7 +62,7 @@ A valid payload interrupts the animation on screen, even if its arguments turn o
 ## Attract mode, clock and carousel
 
 - `Running.scrollOrder` codes playable on the ESP32: `1` random GIF, `2` random image (4 s), `T` clock, `4` text
-  carousel, and `F` random `fx` animation (ESP32 extension). `M`/`P`/`E`/`S` come with phase 4 and are skipped until then.
+  carousel, `M` weather, `P` forecast, `E` EDF Tempo, `S` board status, and `F` random `fx` animation (ESP32 extension).
 - `Running.attract_mode` (seconds, default 0 = off): attract mode starts by itself after that long without a message.
   Any message stops it.
 - Time comes from NTP; `ClockRenderer.timezone` takes the IANA name used on the Pi (`Europe/Paris`, ...) or a POSIX TZ.
@@ -84,6 +89,16 @@ Everything lives on the board's LittleFS partition (~900 KB) and can be managed 
 GIFs and PNGs are shrunk to fit the panel (never enlarged) and centred when `DMDRenderer.center_images` is 1.
 Keep them panel-sized: decoding a 640x480 HDMI asset works but is slow and wastes flash.
 
+## Online data
+
+- Requests run on a background task (HTTPS takes 1–3 s), so MQTT and animations never stall; a loading animation
+  shows meanwhile, and an error message (no appid, no Wi-Fi, HTTP error) if the request fails.
+- Weather answers are cached for `OpenWeatherMap.callevery` minutes, Tempo until the next day, like the Pi's token files.
+- Icons: the Pi's PNG sets are used when uploaded to `/meteo/<icon>.png` (OWM codes, e.g. `10d.png`) and
+  `/edfjourstempo/<code>.png`; otherwise icons, wind arrow and Tempo colours are drawn by the firmware.
+- Wind speed is converted from m/s to km/h (the Pi printed the m/s value with a "km/h" label).
+- TLS certificates are not verified (no CA store on the board); only public weather data and the OWM key go over it.
+
 ## Settings
 
 `conf|Section|key:value` stores any Raspy2DMD key in `config.json` (`settings`, keyed `Section.key`).
@@ -94,6 +109,7 @@ Keys used so far, with the original defaults:
 | `TextRenderer` | `defaultfontcolor` (0,0,255), `picturebackgroundcolor` (0,0,0), `maxcharacter` (22), `maxfontsize` |
 | `ClockRenderer` | `clockBackgroundImage` (OldGame.png), `showing_datehours` (2), `timeShow_Date` (2), `timeShow_Hours` (4), `format_date` (`%d %b %Y`), `format_hours` (`%H:%M:%S`), `format_affichage` (fr_FR), `timezone` (Europe/Paris), `defaultfontcolor_clock` (0,0,255), `defaultfontcolor_clockshadow` (255,0,0) |
 | `Running` | `scrollOrder` (1,T), `attract_mode` (0) |
+| `OpenWeatherMap` | `appid` (0 = off), `lat`, `lon`, `zipcode`, `countrycode`, `units` (metric), `lang` (fr), `callevery` (15 min), `seeduring` (4 s), `prevision` (1 day) |
 | `DMDRenderer` | `brightness` (90), `brightnesshours`, `center_images` (1) |
 
 ## ESP32 extensions
@@ -119,5 +135,5 @@ Special moves in `score` are celebrated: fireworks with rainbow text for `MAXIMU
 1. **Core engine**: non-blocking renderer, FIFO messages, text and movements, score, colours, brightness, reboot. ✅
 2. **Clock and attract mode**: NTP time, `time`, `waiter`, `scrollOrder` playlist, `brightnesshours`, text carousel. ✅
 3. **Media**: GIF/PNG from LittleFS, score and special-move animations, effects, exclusions, upload page. ✅
-4. **Online data**: OpenWeatherMap, EDF Tempo days.
+4. **Online data**: OpenWeatherMap, EDF Tempo days, board status. ✅
 5. **Settings**: full config schema, `receipconf`/`rldconf`, settings web page.

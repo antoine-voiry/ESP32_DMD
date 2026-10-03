@@ -8,6 +8,8 @@
 
 #include "DMDRenderer.h"
 #include "MediaLibrary.h"
+#include "OnlineService.h"
+#include "render/OnlineScenes.h"
 #include "Settings.h"
 #include "Storage.h"
 #include "core/Media.h"
@@ -26,8 +28,8 @@ constexpr uint32_t kFxShowMs = 6000;
 
 }  // namespace
 
-AttractController::AttractController(DMDRenderer* renderer, MediaLibrary* media)
-    : _renderer(renderer), _media(media), _rng(esp_random()) {}
+AttractController::AttractController(DMDRenderer* renderer, MediaLibrary* media, OnlineService* online)
+    : _renderer(renderer), _media(media), _online(online), _rng(esp_random()) {}
 
 void AttractController::start(const std::string& codes) {
     _playlist.reset(new dmd::AttractPlaylist(codes, kSupportedCodes));
@@ -89,6 +91,24 @@ bool AttractController::play(char code) {
             _renderer->renderImage(png, kImageShowMs);
             return true;
         }
+        case 'M':
+            _renderer->renderScene(std::unique_ptr<dmd::Scene>(new CurrentWeatherScene(
+                _renderer->matrix(), *_online, settings::owmConfig(), _renderer->defaultStyle().fg)));
+            return true;
+        case 'P':
+            _renderer->renderScene(std::unique_ptr<dmd::Scene>(new ForecastScene(
+                _renderer->matrix(), *_online, settings::owmConfig(), _renderer->defaultStyle().fg)));
+            return true;
+        case 'E':
+            _renderer->renderScene(std::unique_ptr<dmd::Scene>(
+                new TempoScene(_renderer->matrix(), *_online,
+                               static_cast<uint32_t>(settings::owmConfig().seeDuringSec) * 1000u,
+                               _renderer->defaultStyle().fg)));
+            return true;
+        case 'S':
+            _renderer->renderScene(
+                std::unique_ptr<dmd::Scene>(new PerfScene(_renderer->matrix(), 2000, _renderer->defaultStyle().fg)));
+            return true;
         case 'T':
             _renderer->renderClock(settings::clockSpec());
             return true;

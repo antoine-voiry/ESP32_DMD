@@ -8,25 +8,21 @@
 #include <string>
 #include <vector>
 
+#include "core/Canvas.h"
 #include "core/TextUtil.h"
 #include "matrix/Hub75_Matrix.h"
 
 class GFXcanvas1;
 
-struct Bitmap565 {
-    Bitmap565(int width, int height) : w(width), h(height), px(static_cast<size_t>(width) * height, 0) {}
-    int w;
-    int h;
-    std::vector<uint16_t> px;  // row-major RGB565
-
-    void set(int x, int y, uint16_t c) {
-        if (x >= 0 && y >= 0 && x < w && y < h) px[static_cast<size_t>(y) * w + x] = c;
-    }
-};
+using Bitmap565 = dmd::Canvas;
 
 // Decodes a PNG, shrunk to fit w x h (never enlarged, centred when `center`, like PIL thumbnail +
 // center_images). Transparent pixels are blended with black. nullptr if the file cannot be decoded.
 std::shared_ptr<Bitmap565> loadPng(const std::string& path, int w, int h, bool center);
+
+// Draws text (largest font that fits) into the box (x, y, w, h) of the canvas, centred.
+void drawTextBox(dmd::Canvas& canvas, const std::string& text, int x, int y, int w, int h, const dmd::Rgb& color,
+                 int maxFontPx = 32);
 
 // Shows a frame: the bitmap (or black), then optional 1-bit text centred on top with a black
 // outline for readability, then present().

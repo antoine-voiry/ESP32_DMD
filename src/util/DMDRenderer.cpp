@@ -130,6 +130,10 @@ void DMDRenderer::renderImage(const std::string& path, uint32_t holdMs, const st
     _runner.enqueue(std::unique_ptr<dmd::Scene>(new ImageScene(*_dmd, path, _centerImages, overlay)), holdMs);
 }
 
+void DMDRenderer::renderScene(std::unique_ptr<dmd::Scene> scene, uint32_t holdMs) {
+    _runner.enqueue(std::move(scene), holdMs);
+}
+
 void DMDRenderer::renderClock(ClockSpec spec, uint32_t holdMs) {
     _runner.enqueue(std::unique_ptr<dmd::Scene>(new ClockScene(*_dmd, std::move(spec))), holdMs);
 }

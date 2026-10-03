@@ -17,6 +17,10 @@ jobs:
       - uses: actions/checkout@v4
       - name: Run core unit tests
         run: make -C test/host
+      - name: Run JSON parser tests (ArduinoJson)
+        run: |
+          git clone --depth 1 --branch v7.4.3 https://github.com/bblanchon/ArduinoJson.git "$RUNNER_TEMP/ArduinoJson"
+          make -C test/host json ARDUINOJSON="$RUNNER_TEMP/ArduinoJson/src"
 
   firmware:
     name: ESP32 firmware

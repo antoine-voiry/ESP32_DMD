@@ -58,6 +58,21 @@ bool centerImages() {
     return intSetting("DMDRenderer", "center_images", 1) != 0;
 }
 
+dmd::OwmConfig owmConfig() {
+    dmd::OwmConfig c;
+    c.appid = strSetting("OpenWeatherMap", "appid", "0");
+    c.lat = strSetting("OpenWeatherMap", "lat", "0.0");
+    c.lon = strSetting("OpenWeatherMap", "lon", "0.0");
+    c.zipcode = strSetting("OpenWeatherMap", "zipcode", "0");
+    c.countrycode = strSetting("OpenWeatherMap", "countrycode", "0");
+    c.units = strSetting("OpenWeatherMap", "units", "metric");
+    c.lang = strSetting("OpenWeatherMap", "lang", "fr");
+    c.callEveryMin = static_cast<int>(intSetting("OpenWeatherMap", "callevery", 15));
+    c.seeDuringSec = static_cast<int>(intSetting("OpenWeatherMap", "seeduring", 4));
+    c.prevision = static_cast<int>(intSetting("OpenWeatherMap", "prevision", 1));
+    return c;
+}
+
 std::string scrollOrder() {
     return strSetting("Running", "scrollOrder", "1,T");
 }

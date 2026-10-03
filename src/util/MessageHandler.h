@@ -12,6 +12,7 @@
 #include "AttractController.h"
 #include "DMDRenderer.h"
 #include "MediaLibrary.h"
+#include "OnlineService.h"
 #include "TimeService.h"
 
 class MessageHandler {
@@ -22,6 +23,8 @@ private:
     AttractController* attract;
     TimeService* timeService;
     MediaLibrary* media;
+    OnlineService* online;
+    void lookUpZipCode();
     MessageHandler() = delete;
     void setupHandlers();
     void notPortedYet(const char* action, const char* phase);
@@ -35,7 +38,7 @@ private:
 
 public:
     MessageHandler(DMDRenderer* renderer, AttractController* attract, TimeService* timeService,
-                   MediaLibrary* media);
+                   MediaLibrary* media, OnlineService* online);
     void handleMessage(const std::string& message);
 };
 #endif

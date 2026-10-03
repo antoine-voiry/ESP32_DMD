@@ -19,7 +19,16 @@ cxx11:
 run: cxx11 $(BUILD)/test_core
 	./$(BUILD)/test_core
 
+# JSON parsers (src/net) need ArduinoJson: make json ARDUINOJSON=/path/to/ArduinoJson/src
+json: $(BUILD)/test_json
+	./$(BUILD)/test_json
+
+$(BUILD)/test_json: test_json.cpp $(SRC_DIR)/net/OnlineJson.cpp $(CORE_SRCS)
+	@test -n "$(ARDUINOJSON)" || (echo "Set ARDUINOJSON=<ArduinoJson>/src" && false)
+	@mkdir -p $(BUILD)
+	$(CXX) $(CXXFLAGS) -fsanitize=address,undefined -I$(SRC_DIR) -I$(ARDUINOJSON) test_json.cpp $(SRC_DIR)/net/OnlineJson.cpp $(CORE_SRCS) -o $@
+
 clean:
 	rm -rf $(BUILD)
 
-.PHONY: all run clean cxx11
+.PHONY: all run clean cxx11 json
