@@ -8,6 +8,7 @@
 #include "core/Attract.h"
 #include "core/Canvas.h"
 #include "core/Clock.h"
+#include "core/ConfigSchema.h"
 #include "core/Fx.h"
 #include "core/Media.h"
 #include "core/Motion.h"
@@ -653,6 +654,55 @@ static void testOnlineDrawing() {
     CHECK(a.count(1) > 10);
 }
 
+static void testConfigSchema() {
+    const auto& schema = configSchema();
+    CHECK(schema.size() > 80);
+    CHECK_EQ(std::string(schema.front().section), std::string("DMDRenderer"));
+    CHECK_EQ(std::string(schema.back().section), std::string("Sound"));
+    // No duplicates (case-insensitive).
+    for (size_t i = 0; i < schema.size(); ++i) {
+        for (size_t j = i + 1; j < schema.size(); ++j) {
+            CHECK(!(std::string(schema[i].section) == schema[j].section &&
+                    normaliseKey(schema[i].key) == normaliseKey(schema[j].key)));
+        }
+    }
+    const SettingDef* d = findSetting("Running", "SCROLLORDER");
+    CHECK(d != nullptr);
+    CHECK_EQ(std::string(d->key), std::string("scrollOrder"));
+    CHECK_EQ(std::string(d->def), std::string("1,T"));
+    CHECK(findSetting("running", "scrollOrder") == nullptr);  // sections are case-sensitive
+    CHECK(findSetting("Running", "nope") == nullptr);
+    CHECK_EQ(std::string(findSetting("DMDRenderer", "led_chain")->def), std::string("1"));
+
+    std::vector<std::string> lines = receipconfLines([](const SettingDef& def) {
+        return std::string(def.key) == "appid" ? std::string("secret") : std::string(def.def);
+    });
+    CHECK_EQ(lines.size(), schema.size());
+    CHECK_EQ(lines[0], std::string("DMDRenderer:cols:64"));
+    CHECK(std::find(lines.begin(), lines.end(), std::string("OpenWeatherMap:appid:secret")) != lines.end());
+    CHECK(std::find(lines.begin(), lines.end(), std::string("ClockRenderer:format_date:%d %b %Y")) != lines.end());
+
+    CHECK(needsRestart("DMDRenderer", "COLS"));
+    CHECK(needsRestart("Running", "standalone"));
+    CHECK(!needsRestart("DMDRenderer", "brightness"));
+    CHECK(allowedInStandalone("msg"));
+    CHECK(allowedInStandalone("conf"));
+    CHECK(allowedInStandalone("perf"));
+    CHECK(!allowedInStandalone("score"));
+    CHECK(!allowedInStandalone("waiter"));
+    CHECK(!allowedInStandalone("gif"));
+
+    PanelGeometry def{64, 32, 1};
+    PanelGeometry g = panelGeometry("", "", "", def);
+    CHECK(g.cols == 64 && g.rows == 32 && g.chain == 1 && g.width() == 64);
+    g = panelGeometry("64", "64", "2", def);
+    CHECK(g.rows == 64 && g.width() == 128);
+    g = panelGeometry("999", "2", "-1", def);
+    CHECK(g.cols == 128 && g.rows == 16 && g.chain == 1);
+    g = panelGeometry("abc", "32x", "", def);
+    CHECK(g.cols == 64 && g.rows == 32);
+}
+
 int main() {
     testParseCommand();
     testFilter();
@@ -677,6 +727,7 @@ int main() {
     testForecastPages();
     testOnlineFormatting();
     testOnlineDrawing();
+    testConfigSchema();
     std::printf("%d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }

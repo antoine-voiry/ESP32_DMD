@@ -117,6 +117,13 @@ void MQTTHelper::handleCallback(char* topic, byte* payload, unsigned int length)
     ESP_LOGD(TAG, "Received message on topic %s: %s", topic, message.c_str());
 }
 
+bool MQTTHelper::publish(const std::string& topic, const std::string& payload) {
+    if (!_mqttClient.connected()) {
+        return false;
+    }
+    return _mqttClient.publish(topic.c_str(), payload.c_str());
+}
+
 void MQTTHelper::loop() {
     // Call the loop function to process incoming messages
     if (_mqttClient.connected()) {

@@ -53,7 +53,13 @@ void AttractController::stop() {
 
 void AttractController::onMessage(uint32_t nowMs) {
     stop();
-    _idle.configure(settings::attractAfterMs());
+    uint32_t afterMs = settings::attractAfterMs();
+    // Standalone mode lives in attract mode: resume it shortly after a message (the Pi never did,
+    // so a single message stopped its standalone display for good).
+    if (settings::standalone() && afterMs == 0) {
+        afterMs = 5000;
+    }
+    _idle.configure(afterMs);
     _idle.touch(nowMs);
 }
 

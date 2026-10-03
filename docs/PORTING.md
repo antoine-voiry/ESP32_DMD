@@ -30,7 +30,7 @@ A valid payload interrupts the animation on screen, even if its arguments turn o
 | `msgmove` | `text\|sens[\|holdSec]` | ✅ |
 | `msgmovebcl` | `text\|sens\|iterations[\|holdSec]` | ✅ (original slept `iterations` s, a typo; we use `holdSec`) |
 | `msgcolor` | `text\|r;g;b\|r;g;b` | ✅ |
-| `conf` | `Section\|key:value\|...` | ✅ stored in `config.json` and read live (see *Settings*) |
+| `conf` | `Section\|key:value\|...` | ✅ stored in `config.json` and read live (see *Settings*); panel size and standalone restart the board |
 | `rebt` | – | ✅ `ESP.restart()` |
 | `shutdwn` | – | ✅ blank panel + deep sleep (power cycle to restart) |
 | `testFont` | `font.ttf` | ⚠️ sample text with built-in fonts (no TrueType on ESP32) |
@@ -55,7 +55,7 @@ A valid payload interrupts the animation on screen, even if its arguments turn o
 | `edfJoursTempo` | – | ✅ today's and tomorrow's Tempo colour (api-couleur-tempo.fr) |
 | `owmzc`, `fllcn` | – | ✅ zip code → city name, lat, lon (stored in `OpenWeatherMap`) |
 | `perf` | – | ✅ board status: temperature, CPU MHz, free RAM, uptime, Wi-Fi signal and IP |
-| `receipconf` | | ⏳ phase 5 |
+| `receipconf` | – | ✅ publishes every setting as `Section:key:value` on `Running.raspydartscanal` when `Running.resptoraspydarts` is 1 |
 
 `sens`: `left`, `right`, `up`, `down`, `rotate`, `antirotate`, `flip`, `twirl`.
 
@@ -101,16 +101,25 @@ Keep them panel-sized: decoding a 640x480 HDMI asset works but is slow and waste
 
 ## Settings
 
-`conf|Section|key:value` stores any Raspy2DMD key in `config.json` (`settings`, keyed `Section.key`).
-Keys used so far, with the original defaults:
+`conf|Section|key:value` and the web page `/settings` store any Raspy2DMD key in `config.json` (`settings`, keyed
+`Section.key`; keys are case-insensitive like configparser). Every key of `Raspy2DMD.cfg` is known
+(`src/core/ConfigSchema.cpp`) so `receipconf` reports them all; the ones used by the ESP32:
 
 | Section | Keys |
 |---|---|
-| `TextRenderer` | `defaultfontcolor` (0,0,255), `picturebackgroundcolor` (0,0,0), `maxcharacter` (22), `maxfontsize` |
+| `TextRenderer` | `defaultfontcolor` (0,0,255), `picturebackgroundcolor` (0,0,0), `maxcharacter` (22), `maxfontsize` (30) |
 | `ClockRenderer` | `clockBackgroundImage` (OldGame.png), `showing_datehours` (2), `timeShow_Date` (2), `timeShow_Hours` (4), `format_date` (`%d %b %Y`), `format_hours` (`%H:%M:%S`), `format_affichage` (fr_FR), `timezone` (Europe/Paris), `defaultfontcolor_clock` (0,0,255), `defaultfontcolor_clockshadow` (255,0,0) |
-| `Running` | `scrollOrder` (1,T), `attract_mode` (0) |
+| `Running` | `scrollOrder` (1,T), `attract_mode` (0), `standalone` (0), `default` (1: show the web address at start-up), `raspydartscanal` (raspydarts/dmd), `resptoraspydarts` (0) |
 | `OpenWeatherMap` | `appid` (0 = off), `lat`, `lon`, `zipcode`, `countrycode`, `units` (metric), `lang` (fr), `callevery` (15 min), `seeduring` (4 s), `prevision` (1 day) |
-| `DMDRenderer` | `brightness` (90), `brightnesshours`, `center_images` (1) |
+| `DMDRenderer` | `cols` (64), `rows` (32), `led_chain` (1) — applied at start-up, `brightness` (90), `brightnesshours`, `center_images` (1) |
+
+Standalone mode (`Running.standalone = 1`): the attract mode starts at boot and only the commands the Pi accepted in
+standalone mode are handled (`msg`, `conf`, `rldconf`, `receipconf`, weather, Tempo, `perf`, exclusions, reboot,
+shutdown); the others are ignored without interrupting the display. Unlike the Pi, where one message stopped the
+standalone display for good, the attract mode resumes 5 s after a message (or `attract_mode` seconds).
+
+Kept for Raspydarts but without effect on the ESP32 (shown greyed on `/settings`): Pi GPIO/PWM timings, HDMI, sound,
+TrueType fonts and clock positions, `Directory` paths (the media folders are fixed, see *Media files*).
 
 ## ESP32 extensions
 
@@ -129,6 +138,9 @@ Special moves in `score` are celebrated: fireworks with rainbow text for `MAXIMU
 - Fonts: Adafruit GFX bitmap fonts (FreeSansBold 18/12/9 pt, then the built-in 6x8 font at x2 and x1),
   largest that fits, instead of a shrinking TrueType font. Text is ASCII only: accents are stripped (`é` → `e`).
 - `showing_datehours = 1` (the `GetConfig()` fallback) showed nothing on the Pi; it alternates date and time here.
+- Default `led_chain` is 1 (one 64x32 panel) instead of the Pi's 2.
+- No audio output: `sound` and the sound part of effects are ignored.
+- `rebt` restarts the ESP32; `shutdwn` blanks the panel and deep-sleeps (power cycle to restart).
 
 ## Phases
 
@@ -136,4 +148,4 @@ Special moves in `score` are celebrated: fireworks with rainbow text for `MAXIMU
 2. **Clock and attract mode**: NTP time, `time`, `waiter`, `scrollOrder` playlist, `brightnesshours`, text carousel. ✅
 3. **Media**: GIF/PNG from LittleFS, score and special-move animations, effects, exclusions, upload page. ✅
 4. **Online data**: OpenWeatherMap, EDF Tempo days, board status. ✅
-5. **Settings**: full config schema, `receipconf`/`rldconf`, settings web page.
+5. **Settings**: full config schema, `receipconf`/`rldconf`, panel geometry, standalone mode, settings web page. ✅

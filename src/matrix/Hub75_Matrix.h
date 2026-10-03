@@ -25,25 +25,35 @@
 #define B_PIN   GPIO_NUM_16
 #define C_PIN   GPIO_NUM_17
 #define D_PIN   GPIO_NUM_18
-#define E_PIN   -1  // not assigned (needed for 64-row panels)
+#ifndef E_PIN
+#define E_PIN   -1  // not assigned; 64-row panels need it (e.g. -DE_PIN=GPIO_NUM_xx in platformio.ini)
+#endif
 
 #define LAT_PIN GPIO_NUM_32
 #define OE_PIN  GPIO_NUM_33
 #define CLK_PIN GPIO_NUM_15
 
+// Defaults when DMDRenderer.cols / rows / led_chain are not set (see Hub75_Matrix(cols, rows, chain)).
+#ifndef PANEL_WIDTH
 #define PANEL_WIDTH 64
+#endif
+#ifndef PANEL_HEIGHT
 #define PANEL_HEIGHT 32   // Panel height of 64 will required PIN_E to be defined.
+#endif
+#ifndef PANELS_NUMBER
 #define PANELS_NUMBER 1   // Number of chained panels
+#endif
 
 // Thin wrapper around the HUB75 DMA driver.
 // The panel is double buffered: draw a full frame, then call present() to show it.
 class Hub75_Matrix {
 public:
-    Hub75_Matrix();
+    // cols x rows pixels per panel, `chain` panels side by side.
+    Hub75_Matrix(int cols = PANEL_WIDTH, int rows = PANEL_HEIGHT, int chain = PANELS_NUMBER);
     ~Hub75_Matrix();
 
-    int width() const { return PANEL_WIDTH * PANELS_NUMBER; }
-    int height() const { return PANEL_HEIGHT; }
+    int width() const { return _cols * _chain; }
+    int height() const { return _rows; }
 
     uint16_t color(uint8_t r, uint8_t g, uint8_t b) const;
     void fillScreen(uint16_t color);
@@ -62,6 +72,9 @@ public:
 
 private:
     MatrixPanel_I2S_DMA* _matrix = nullptr;
+    int _cols;
+    int _rows;
+    int _chain;
 };
 
 #endif

@@ -7,6 +7,7 @@
  */
 
 #include "ConfigHelper.h"
+#include "core/ConfigSchema.h"
 
 // Define the static member variable
 ConfigHelper* ConfigHelper::_instance = nullptr;
@@ -105,7 +106,13 @@ bool ConfigHelper::loadConfigFile() {
                             JsonObject settings = json["settings"].as<JsonObject>();
                             if (!settings.isNull()) {
                                 for (JsonPair kv : settings) {
-                                    _settings[kv.key().c_str()] = std::string(kv.value() | "");
+                                    // Keys are "Section.key"; keys are case-insensitive like configparser.
+                                    std::string k = kv.key().c_str();
+                                    const size_t dot = k.find('.');
+                                    if (dot != std::string::npos) {
+                                        k = k.substr(0, dot + 1) + dmd::normaliseKey(k.substr(dot + 1));
+                                    }
+                                    _settings[k] = std::string(kv.value() | "");
                                 }
                             }
 
@@ -171,7 +178,10 @@ void ConfigHelper::setHostname(const std::string hostname) {
 
 std::string ConfigHelper::getSetting(const std::string& section, const std::string& key,
                                      const std::string& fallback) const {
-    auto it = _settings.find(section + "." + key);
+    const std::string k = dmd::normaliseKey(key);
+    if (section == "DMDRenderer" && k == "brightness") return std::to_string(_brightness);
+    if (section == "DMDRenderer" && k == "brightnesshours") return _brightnessHours.empty() ? fallback : _brightnessHours;
+    auto it = _settings.find(section + "." + k);
     return it == _settings.end() || it->second.empty() ? fallback : it->second;
 }
 
@@ -186,7 +196,16 @@ long ConfigHelper::getSettingInt(const std::string& section, const std::string& 
 }
 
 void ConfigHelper::setSetting(const std::string& section, const std::string& key, const std::string& value) {
-    _settings[section + "." + key] = value;
+    const std::string k = dmd::normaliseKey(key);
+    if (section == "DMDRenderer" && k == "brightness") {
+        _brightness = static_cast<int>(strtol(value.c_str(), nullptr, 10));
+        return;
+    }
+    if (section == "DMDRenderer" && k == "brightnesshours") {
+        _brightnessHours = value;
+        return;
+    }
+    _settings[section + "." + k] = value;
 }
 
 // Default constructor definition

@@ -40,6 +40,8 @@ class MQTTHelper {
         std::vector<std::string> unStackMessages(int maxCount = MAX_MESSAGE_COUNT);
         void loop();
         boolean handleConnect();
+        // Publishes on the broker we are connected to; false when disconnected or too long for the buffer.
+        bool publish(const std::string& topic, const std::string& payload);
         ~MQTTHelper();
     };
 

@@ -2,7 +2,10 @@
 #include <WiFi.h>      // ESP32 WiFi Library
 #include <FS.h>        // Include for File class
 #include <sstream>
+#include <cstring>
 #include <iomanip>
+#include "ConfigHelper.h"
+#include "core/ConfigSchema.h"
 #include "core/Media.h"
 #include "core/TextUtil.h"
 static const char* TAG = "LocalWebServer";
@@ -26,6 +29,8 @@ LocalWebServer::LocalWebServer() : server(SERVER_PORT), tokenTimestamp(0), reque
     server.on("/upload", HTTP_POST, std::bind(&LocalWebServer::handleUploadDone, this),
               std::bind(&LocalWebServer::handleUpload, this));
     server.on("/delete", HTTP_POST, std::bind(&LocalWebServer::handleDelete, this));
+    server.on("/settings", HTTP_GET, std::bind(&LocalWebServer::handleSettings, this));
+    server.on("/settings", HTTP_POST, std::bind(&LocalWebServer::handleSaveSettings, this));
     server.onNotFound(std::bind(&LocalWebServer::handleNotFound, this));
 
 }
@@ -47,6 +52,7 @@ void LocalWebServer::handleRoot() {
     String html = F("<!DOCTYPE html><html><head><title>Configuration</title></head><body>"
                    "<h1>DMD Device Configuration</h1>"
                    "<p><a href='/config'>View/Edit Configuration</a></p>"
+                   "<p><a href='/settings'>Raspy2DMD settings</a></p>"
                    "<p><a href='/files'>Media files (GIFs, images, carousel texts, effects)</a></p>"
                    "</body></html>");
     server.send(200, "text/html", html);
@@ -301,5 +307,79 @@ void LocalWebServer::handleDelete() {
     storage().remove(path);
     ESP_LOGI(TAG, "Deleted %s", path.c_str());
     server.sendHeader("Location", "/files");
+    server.send(303);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Raspy2DMD settings
+
+void LocalWebServer::handleSettings() {
+    const ConfigHelper& config = ConfigHelper::getInstance();
+    String html = F("<!DOCTYPE html><html><head><meta charset='utf-8'><title>Raspy2DMD settings</title>"
+                    "<style>body{font-family:sans-serif}label{display:inline-block;width:16em}"
+                    ".off{color:#888}fieldset{margin-bottom:1em}</style></head><body>"
+                    "<h1>Raspy2DMD settings</h1>"
+                    "<p>Same keys as Raspy2DMD.cfg (and conf|Section|key:value). Grey keys are kept for "
+                    "Raspydarts but have no effect on the ESP32. Panel size and standalone mode restart the board.</p>"
+                    "<form method='post' action='/settings'>");
+    const char* section = "";
+    for (const dmd::SettingDef& def : dmd::configSchema()) {
+        if (strcmp(section, def.section) != 0) {
+            if (*section) html += "</fieldset>";
+            section = def.section;
+            html += "<fieldset><legend>";
+            html += def.section;
+            html += "</legend>";
+        }
+        const std::string name = std::string(def.section) + "." + def.key;
+        const std::string value = config.getSetting(def.section, def.key, def.def);
+        html += def.usedOnEsp32 ? "<label>" : "<label class='off'>";
+        html += def.key;
+        html += "</label><input size='40' name='";
+        html += dmd::htmlEscape(name).c_str();
+        html += "' value='";
+        html += dmd::htmlEscape(value).c_str();
+        html += "'><br>";
+    }
+    html += F("</fieldset><input type='submit' value='Save'></form><p><a href='/'>Back</a></p></body></html>");
+    server.send(200, "text/html", html);
+}
+
+void LocalWebServer::handleSaveSettings() {
+    if (!checkRateLimit()) {
+        server.send(429, "text/plain", "Too many requests");
+        return;
+    }
+    ConfigHelper& config = ConfigHelper::getInstance();
+    bool restart = false;
+    int changed = 0;
+    for (int i = 0; i < server.args(); i++) {
+        const std::string name = server.argName(i).c_str();
+        const size_t dot = name.find('.');
+        if (dot == std::string::npos) continue;
+        const std::string section = name.substr(0, dot);
+        const std::string key = name.substr(dot + 1);
+        const dmd::SettingDef* def = dmd::findSetting(section, key);
+        if (!def) continue;  // only known Raspy2DMD keys
+        const std::string value = server.arg(i).c_str();
+        if (config.getSetting(section, key, def->def) == value) continue;
+        config.setSetting(section, key, value);
+        restart = restart || dmd::needsRestart(section, key);
+        ++changed;
+    }
+    if (changed > 0) {
+        config.saveConfigFile();
+        ESP_LOGI(TAG, "%d setting(s) saved from the web page", changed);
+    }
+    if (restart) {
+        server.send(200, "text/plain", "Saved, restarting to apply the panel / standalone settings...");
+        delay(500);
+        ESP.restart();
+        return;
+    }
+    if (changed > 0 && onSettingsSaved) {
+        onSettingsSaved();
+    }
+    server.sendHeader("Location", "/settings");
     server.send(303);
 }

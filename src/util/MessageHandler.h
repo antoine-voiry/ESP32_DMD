@@ -25,6 +25,8 @@ private:
     MediaLibrary* media;
     OnlineService* online;
     void lookUpZipCode();
+    std::function<bool(const std::string&, const std::string&)> publisher;
+    bool restartPending = false;
     MessageHandler() = delete;
     void setupHandlers();
     void notPortedYet(const char* action, const char* phase);
@@ -40,5 +42,15 @@ public:
     MessageHandler(DMDRenderer* renderer, AttractController* attract, TimeService* timeService,
                    MediaLibrary* media, OnlineService* online);
     void handleMessage(const std::string& message);
+    // False for commands standalone mode ignores: they must not even interrupt the display.
+    bool accepts(const std::string& message) const;
+    // receipconf answers through this (topic, payload).
+    void setPublisher(std::function<bool(const std::string&, const std::string&)> publish) {
+        publisher = std::move(publish);
+    }
+    // receipconf: every setting as "Section:key:value", like SendConfigToRaspydarts().
+    void sendConfig();
+    // rldconf: re-applies the settings cached at start-up (text style, brightness, timezone, caches).
+    void reloadSettings();
 };
 #endif

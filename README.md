@@ -1,187 +1,58 @@
-# MQTT_TEST Project
+# ESP32 DMD
 
-This project is an ESP32-based application developed using PlatformIO that creates a configurable MQTT client. It features Wi-Fi management, persistent configuration storage, and a web-based setup interface.
+ESP32 firmware for a HUB75 RGB LED panel driven by Raspydarts over MQTT:
+a port of **Raspy2DMD** (the Raspberry Pi DMD renderer) to a single ESP32 board.
 
-## 🗂️ Project Structure
+It understands the same `action|arg|...` MQTT messages as Raspy2DMD 1.5.4.27: text with movements and
+colours, scores with special moves and animations, GIFs and images, the clock, the attract mode and text
+carousel, OpenWeatherMap weather and forecast, EDF Tempo days, and the `conf` settings. It also adds a few
+ESP32-only effects (fireworks, plasma, rainbow and typewriter text, ...).
 
-```
-MQTT_TEST/
-├── src/
-│   ├── main.cpp               # Application entry point
-│   └── util/                  # Utility classes
-│       ├── ConfigHelper.*     # Configuration management
-│       └── WifiManagerHelper.*# Wi-Fi setup handling
-├── include/                   # Header files
-├── lib/                      # Project-specific libraries
-├── test/                     # Unit tests
-└── platformio.ini            # PlatformIO configuration
-```
+The full command table, settings and differences from the Pi are in [docs/PORTING.md](docs/PORTING.md).
 
-## ✨ Features
+## Hardware
 
-- **Wi-Fi Management**: 
-  - Web-based configuration portal
-  - Persistent Wi-Fi credentials storage
-  - Automatic reconnection handling
-- **MQTT Configuration**:
-  - Configurable broker URL and path
-  - Custom client hostname support
-  - Connection state management
-- **System Features**:
-  - SPIFFS-based configuration storage
-  - Web-based setup interface
-  - Status LED indicators
-  - Serial debug output
+- ESP32 dev board (4 MB flash, no PSRAM needed)
+- HUB75 panel, 64x32 by default (`DMDRenderer.cols`, `rows`, `led_chain` change it; 64-row panels need
+  `-DE_PIN=<gpio>`)
+- Wiring: see the pin table in `src/matrix/Hub75_Matrix.h` (R1 25, G1 26, B1 27, R2 21, G2 22, B2 23,
+  A 12, B 16, C 17, D 18, CLK 15, LAT 32, OE 33)
 
-## 🔧 Requirements
-
-### Hardware
-- ESP32 development board
-- Micro USB cable
-- LED (optional, for status indication)
-
-### Software
-- Visual Studio Code with PlatformIO extension
-- ESP32 Arduino framework
-- Required Libraries:
-  - WiFiManager
-  - PubSubClient
-  - ArduinoJson
-
-## 📦 Installation
-
-1. **Clone the Repository**:
-   ```bash
-   git clone https://github.com/yourusername/MQTT_TEST.git
-   cd MQTT_TEST
-   ```
-
-2. **Open in VS Code**:
-   ```bash
-   code .
-   ```
-
-3. **Install Dependencies**:
-   - Open PlatformIO extension
-   - Click "Build" to install required libraries
-
-## ⚙️ Configuration
-
-### Initial Setup
-1. Power up the ESP32
-2. Connect to the "DMD_CONFIG_WIFI" Wi-Fi network
-3. Open the configuration portal (usually at 192.168.4.1)
-4. Configure:
-   - Wi-Fi credentials
-   - MQTT broker URL
-   - MQTT base path
-   - Device hostname
-
-### Configuration Parameters
-- **MQTT URL**: Broker address (e.g., `mqtt://broker.example.com`)
-- **MQTT Path**: Base topic path (e.g., `/home/sensors/`)
-- **Hostname**: Device identifier on network
-
-## 🚀 Building and Flashing
-
-### Using VS Code + PlatformIO
-1. **Build Project**:
-   ```bash
-   pio run
-   ```
-
-2. **Upload to ESP32**:
-   ```bash
-   pio run --target upload
-   ```
-
-3. **Monitor Serial Output**:
-   ```bash
-   pio device monitor
-   ```
-
-### Using PlatformIO CLI
-```bash
-# Build
-pio run
-
-# Upload
-pio run -t upload
-
-# Monitor
-pio device monitor
-```
-
-## 🔍 Debugging
-
-### Serial Monitor Output
-- Baud Rate: 115200
-- Debug messages include:
-  - Wi-Fi connection status
-  - MQTT connection state
-  - Configuration changes
-  - System events
-
-### LED Status Indicators
-- **Solid**: Connected to Wi-Fi and MQTT
-- **Slow Blink**: Wi-Fi connected, MQTT disconnected
-- **Fast Blink**: Configuration mode active
-- **Off**: System offline
-
-## ⚙️ How It Works
-
-1.  **Initialization**:
-    *   The ESP32 initializes and attempts to connect to Wi-Fi using stored credentials. If no credentials are found, it starts in configuration mode, hosting a web portal for setup.
-2.  **Wi-Fi Connection**:
-    *   If Wi-Fi credentials are valid, the ESP32 connects to the specified network.
-    *   If the connection fails or no credentials are saved, the ESP32 enters Access Point (AP) mode, allowing configuration via a web browser.
-3.  **MQTT Connection**:
-    *   After a successful Wi-Fi connection, the ESP32 attempts to connect to the MQTT broker using the configured URL, path, and hostname.
-    *   It subscribes to the specified MQTT topic to receive messages.
-4.  **Message Handling**:
-    *   When an MQTT message is received, the ESP32 processes the message and updates the DMD (Dot Matrix Display) accordingly.
-    *   The message content is parsed, and the display is updated in real-time.
-5.  **DMD Display**:
-    *   The ESP32 controls the DMD to display the received messages.
-    *   The display logic handles scrolling, formatting, and any other visual effects.
-6.  **Configuration Updates**:
-    *   Users can update the Wi-Fi and MQTT settings via the web configuration portal.
-    *   The updated configuration is saved to SPIFFS for persistent storage.
-7.  **Error Handling**:
-    *   The system includes error handling for Wi-Fi and MQTT connections, providing status updates via serial output and LED indicators.
-    *   If the MQTT connection is lost, the system attempts to reconnect automatically.
-
-## 🧪 Testing
+## Build and flash
 
 ```bash
-# Run all tests
-pio test
-
-# Run specific test
-pio test -f test_wifi
+pio run -t upload        # firmware
+pio device monitor       # logs at 115200 baud
 ```
 
-## 📝 Contributing
+The first boot (and the first boot after the partition change) opens a Wi-Fi access point
+`DMD_CONFIG_WIFI`: connect to it and enter your Wi-Fi network, the MQTT broker (usually `raspydarts.local`),
+the MQTT topic and the hostname.
 
-1. Fork the repository
-2. Create feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit changes (`git commit -m 'Add AmazingFeature'`)
-4. Push to branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
+## Using it
 
-## 📄 License
+- Raspydarts drives it over MQTT. By hand: `mosquitto_pub -h raspydarts.local -t <topic> -m 'msg|Hello|3'`.
+- Web pages on `http://<board-ip>/`:
+  - `/settings`: every Raspy2DMD setting (same keys as `Raspy2DMD.cfg` and `conf|Section|key:value`)
+  - `/files`: upload GIFs, images, carousel texts, `effets.txt`... into the board's 900 KB LittleFS
+  - `/config`: Wi-Fi portal values (MQTT broker, topic, hostname)
 
-Distributed under the MIT License. See `LICENSE` for more information.
+## Code layout
 
-## 📚 Resources
+| Folder | What |
+|---|---|
+| `src/core` | Board-independent logic: protocol, scheduling, text layout, motions, effects maths, clock, media rules, weather/Tempo logic, settings schema. Unit tested on the host. |
+| `src/net` | JSON parsers for OpenWeatherMap and EDF Tempo (ArduinoJson) |
+| `src/render` | Scenes drawn on the panel: text, effects, clock, GIF/PNG, weather |
+| `src/util` | Firmware services: MQTT, Wi-Fi, web server, settings, storage, attract mode, NTP, online fetches |
+| `src/matrix` | HUB75 DMA driver wrapper |
+| `test/host` | Host unit tests |
 
-- [PlatformIO Documentation](https://docs.platformio.org/)
-- [ESP32 Arduino Core](https://github.com/espressif/arduino-esp32)
-- [WiFiManager Library](https://github.com/tzapu/WiFiManager)
-- [PubSubClient Library](https://github.com/knolleary/pubsubclient)
+## Tests
 
-## 🤝 Support
+```bash
+make -C test/host                                         # core tests (ASan/UBSan) + C++11 compile check
+make -C test/host json ARDUINOJSON=<ArduinoJson>/src      # JSON parser tests
+```
 
-For support and questions:
-- Open an issue
-- Contact: your.email@example.com
+CI (`.github/workflows/build.yml`) runs both and builds the firmware on every pull request.
