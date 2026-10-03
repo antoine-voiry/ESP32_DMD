@@ -32,6 +32,7 @@ class WifiManagerHelper
     bool _callbackRegistered = false;  
     static void WiFiEvent(WiFiEvent_t event);
     void applydefaultWifiSettings();
+    static bool isConfigButtonHeld();
     WiFiClient _wifiClient;  // Add this member
   public:
     void saveConfigFile(); 

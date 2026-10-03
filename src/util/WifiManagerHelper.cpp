@@ -18,6 +18,10 @@ static const char* TAG = "WiFiManager";
 #define HOSTNAME_LABEL "Hostname"
 #define HOSTNAME_LENGTH 255
 
+// Hold the BOOT button (GPIO0) while powering up / resetting to force the config portal
+#define CONFIG_BUTTON_PIN GPIO_NUM_0
+#define CONFIG_BUTTON_HOLD_MS 1500
+
 // Save Config in JSON format
 void WifiManagerHelper::saveConfigFile() {
     ESP_LOGI(TAG, "saveConfigFile - Saving config file");
@@ -43,27 +47,43 @@ void WifiManagerHelper::applydefaultWifiSettings() {
     // Configure WiFi for stability
     WiFi.persistent(true);
     WiFi.setAutoReconnect(true);   
+    WiFi.mode(WIFI_STA); // explicitly set mode, esp defaults to STA+AP
     // Set power saving to WIFI_PS_NONE for better stability
     esp_wifi_set_ps(WIFI_PS_NONE);
-    // Increase WiFi Tx power
+    // Increase WiFi Tx power (only effective once the WiFi driver is started by WiFi.mode)
     esp_wifi_set_max_tx_power(78);  // Maximum Tx power (in dBm)    
-    WiFi.mode(WIFI_STA); // explicitly set mode, esp defaults to STA+AP
     // Register WiFi event handler
     WiFi.onEvent(WiFiEvent);
 }
+bool WifiManagerHelper::isConfigButtonHeld() {
+    pinMode(CONFIG_BUTTON_PIN, INPUT_PULLUP);
+    delay(50);
+    unsigned long start = millis();
+    while (digitalRead(CONFIG_BUTTON_PIN) == LOW) {
+        if (millis() - start >= CONFIG_BUTTON_HOLD_MS) {
+            return true;
+        }
+        delay(10);
+    }
+    return false;
+}
+
 void WifiManagerHelper::setWMUp(boolean forceConfig, char* hostname) {
     WiFiManager wm;
     std::string mqtt_url_str;
     std::string mqtt_path_str;
     std::string host;
 
+    if (isConfigButtonHeld()) {
+        ESP_LOGW(TAG, "Config button held at boot, forcing config portal");
+        forceConfig = true;
+    }
+
     // Apply default WiFi settings first
     applydefaultWifiSettings();
 
     // Load existing configuration
     if(ConfigHelper::getInstance().isConfigLoaded() && !forceConfig) {
-        mqtt_url_str = ConfigHelper::getInstance().getMqttUrl();
-        mqtt_path_str = ConfigHelper::getInstance().getMqttPath();
         host = ConfigHelper::getInstance().getHostname();
         
         // Set hostname if it's not empty
@@ -75,14 +95,24 @@ void WifiManagerHelper::setWMUp(boolean forceConfig, char* hostname) {
             ESP_LOGW(TAG, "Hostname is empty, using default");
         }
 
-        // Try to connect with existing configuration
+        // Try to connect with the saved credentials only. autoConnect() would open its own
+        // (parameter-less, open "AutoConnectAP") portal on failure, so we disable that and
+        // fall through to our own portal below instead.
         ESP_LOGI(TAG, "Attempting to connect with saved configuration");
-        if (wm.autoConnect("AutoConnectAP")) {
+        wm.setEnableConfigPortal(false);
+        wm.setConnectTimeout(WIFI_CONNECT_TIMEOUT / 1000);
+        wm.setConnectRetries(WIFI_CONNECT_RETRIES);
+        if (wm.autoConnect(PORTAL_NAME, "12345678")) {
             ESP_LOGI(TAG, "Connected to WiFi using saved configuration");
             return;
         }
         // If autoConnect fails, fall through to configuration portal
         ESP_LOGW(TAG, "Failed to connect with saved configuration, starting config portal");
+        wm.setEnableConfigPortal(true);
+        forceConfig = true;
+    } else if (!forceConfig) {
+        // No config file loaded: we need the MQTT parameters, so always open the portal
+        ESP_LOGW(TAG, "No configuration loaded, starting config portal");
         forceConfig = true;
     }
 
@@ -166,7 +196,14 @@ void WifiManagerHelper::WiFiEvent(WiFiEvent_t event) {
             break;
         case SYSTEM_EVENT_STA_DISCONNECTED:
             ESP_LOGW(TAG, "WiFi lost connection");
-            WiFi.reconnect();
+            // Never force a reconnect while the config portal AP is up: STA reconnect
+            // attempts make the radio hop channels, which drops phones from the AP and
+            // prevents the captive portal page from popping up.
+            if (WiFi.getMode() == WIFI_STA) {
+                WiFi.reconnect();
+            }
+            break;
+        default:
             break;
     }
 }
