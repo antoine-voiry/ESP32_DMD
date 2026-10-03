@@ -85,7 +85,10 @@ Fireworks::Fireworks(int width, int height, uint32_t seed)
 
 uint8_t Fireworks::level(const Particle& p) {
     if (p.rocket || p.maxLifeMs == 0) return 255;
-    return static_cast<uint8_t>(255u * p.lifeMs / p.maxLifeMs);
+    // Ease-out: sparks stay bright most of their life, then fade quickly.
+    const uint32_t f = 255u * p.lifeMs / p.maxLifeMs;  // 255 -> 0
+    const uint32_t inv = 255u - f;
+    return static_cast<uint8_t>(255u - inv * inv / 255u);
 }
 
 void Fireworks::launch() {

@@ -37,6 +37,45 @@ MediaLibrary mediaLibrary;
 OnlineService onlineService;
 AttractController* attract = nullptr;
 LocalWebServer* webServer = nullptr;
+static dmd::PanelGeometry panel = {64, 32, 1};
+static int mqttWasConnected = -1;  // unknown until the first check
+
+// One path for every command, whether it came from MQTT or the web page's "Send" box.
+static bool dispatchMessage(const std::string& message) {
+    if (!messageFilter || !messageFilter->isValidMessage(message)) {
+        ESP_LOGW(TAG, "Invalid message: %s", message.c_str());
+        return false;
+    }
+    if (!messageHandler->accepts(message)) {
+        ESP_LOGI(TAG, "Standalone mode, ignored: %s", message.c_str());
+        return false;
+    }
+    attract->onMessage(millis());
+    messageHandler->handleMessage(message);
+    return true;
+}
+
+static std::string formatUptime(unsigned long ms) {
+    const unsigned long s = ms / 1000;
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%lud %02luh %02lum", s / 86400, (s / 3600) % 24, (s / 60) % 60);
+    return buf;
+}
+
+static std::vector<std::pair<std::string, std::string>> boardStatus() {
+    const size_t total = LittleFS.totalBytes(), used = LittleFS.usedBytes();
+    return {
+        {"Hostname", WiFi.getHostname()},
+        {"IP", WiFi.localIP().toString().c_str()},
+        {"Wi-Fi", std::to_string(WiFi.RSSI()) + " dBm"},
+        {"MQTT", mqtt_url + " (" + (mqttWasConnected == 1 ? "connected" : "offline") + ")"},
+        {"Topic", mqtt_topic},
+        {"Panel", std::to_string(panel.width()) + " x " + std::to_string(panel.rows)},
+        {"Uptime", formatUptime(millis())},
+        {"Free heap", std::to_string(ESP.getFreeHeap() / 1024) + " KB"},
+        {"Storage", std::to_string(used / 1024) + " / " + std::to_string(total / 1024) + " KB"},
+    };
+}
 
 void initLogging() {
     Serial.begin(115200);
@@ -121,7 +160,7 @@ void setup() {
     // Initialize maxtrix panel
     // Panel geometry from DMDRenderer.cols / rows / led_chain (applied at start-up, like the Pi).
     const ConfigHelper& config = ConfigHelper::getInstance();
-    const dmd::PanelGeometry geometry = dmd::panelGeometry(
+    const dmd::PanelGeometry geometry = panel = dmd::panelGeometry(
         config.getSetting("DMDRenderer", "cols", ""), config.getSetting("DMDRenderer", "rows", ""),
         config.getSetting("DMDRenderer", "led_chain", ""), dmd::PanelGeometry{PANEL_WIDTH, PANEL_HEIGHT, PANELS_NUMBER});
     Hub75_Matrix* matrix = new Hub75_Matrix(geometry.cols, geometry.rows, geometry.chain);
@@ -195,6 +234,8 @@ void setup() {
     webServer = new LocalWebServer();
     // The settings page re-applies what rldconf re-applies.
     webServer->setOnSettingsSaved([]() { messageHandler->reloadSettings(); });
+    webServer->setOnCommand(dispatchMessage);
+    webServer->setStatusProvider(boardStatus);
     webServer->begin();
 
     ESP_LOGI(TAG, "Setup completed successfully");
@@ -217,7 +258,6 @@ void loop() {
     }
 
     // Handle MQTT messages
-    static int mqttWasConnected = -1;  // unknown until the first check
     if (mqttClient && mqttClient->handleConnect()) {
         if (mqttWasConnected != 1) {
             ESP_LOGI(TAG, "MQTT client connected");
@@ -226,16 +266,7 @@ void loop() {
         mqttClient->loop();
         std::vector<std::string> messages = mqttClient->unStackMessages();
         for (const auto& message : messages) {
-            if (messageFilter && messageFilter->isValidMessage(message)) {
-                if (!messageHandler->accepts(message)) {
-                    ESP_LOGI(TAG, "Standalone mode, ignored: %s", message.c_str());
-                    continue;
-                }
-                attract->onMessage(millis());
-                messageHandler->handleMessage(message);
-            } else {
-                ESP_LOGW(TAG, "Invalid message: %s", message.c_str());
-            }
+            dispatchMessage(message);
         }
     } else if (mqttWasConnected != 0) {
         // Report the state change once instead of redrawing it on every loop.

@@ -1,0 +1,7 @@
+# Files are stored byte for byte: C++ sources and docs keep their committed CRLF endings,
+# Makefiles, scripts and workflows use LF (see .editorconfig). No conversion on checkout.
+* -text
+
+*.gif binary
+*.png binary
+*.ttf binary
