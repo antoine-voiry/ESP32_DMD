@@ -6,6 +6,7 @@
 
 #include <string>
 
+#include "core/Online.h"
 #include "render/ClockScene.h"
 #include "render/TextScene.h"
 
@@ -20,6 +21,9 @@ TextStyle textStyle();
 
 // [DMDRenderer] center_images (default 1).
 bool centerImages();
+
+// [OpenWeatherMap]
+dmd::OwmConfig owmConfig();
 
 // [Running]
 std::string scrollOrder();

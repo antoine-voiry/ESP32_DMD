@@ -5,6 +5,7 @@
 #include "ConfigHelper.h"
 #include "Settings.h"
 #include "Storage.h"
+#include "render/OnlineScenes.h"
 #include "core/Fx.h"
 #include "core/Media.h"
 #include "core/Protocol.h"
@@ -13,8 +14,8 @@
 static const char* TAG = "MessageHandler";
 
 MessageHandler::MessageHandler(DMDRenderer* renderer, AttractController* attract, TimeService* timeService,
-                               MediaLibrary* media)
-    : dmdRenderer(renderer), attract(attract), timeService(timeService), media(media) {
+                               MediaLibrary* media, OnlineService* online)
+    : dmdRenderer(renderer), attract(attract), timeService(timeService), media(media), online(online) {
     ESP_LOGI(TAG, "Initializing MessageHandler");
     setupHandlers();
 }
@@ -319,6 +320,31 @@ void MessageHandler::setupHandlers() {
         timeService->invalidate();
     };
 
+    ////////////////////////////////////////////////////////////////////////////
+    // Online data (phase 4)
+
+    handlers["meteo"] = [this](const std::vector<std::string>&) {
+        dmdRenderer->renderScene(std::unique_ptr<dmd::Scene>(new CurrentWeatherScene(
+            dmdRenderer->matrix(), *online, settings::owmConfig(), dmdRenderer->defaultStyle().fg)));
+    };
+    handlers["meteoPrevi"] = [this](const std::vector<std::string>&) {
+        dmdRenderer->renderScene(std::unique_ptr<dmd::Scene>(new ForecastScene(
+            dmdRenderer->matrix(), *online, settings::owmConfig(), dmdRenderer->defaultStyle().fg)));
+    };
+    handlers["edfJoursTempo"] = [this](const std::vector<std::string>&) {
+        const uint32_t pageMs = static_cast<uint32_t>(settings::owmConfig().seeDuringSec) * 1000u;
+        dmdRenderer->renderScene(std::unique_ptr<dmd::Scene>(
+            new TempoScene(dmdRenderer->matrix(), *online, pageMs, dmdRenderer->defaultStyle().fg)));
+    };
+    handlers["perf"] = [this](const std::vector<std::string>&) {
+        dmdRenderer->renderScene(
+            std::unique_ptr<dmd::Scene>(new PerfScene(dmdRenderer->matrix(), 2000, dmdRenderer->defaultStyle().fg)));
+    };
+    // owmzc (ZipPostCodeGeocoding) and fllcn (FindLatLonCityname) both resolve
+    // OpenWeatherMap.zipcode/countrycode into cityname, lat and lon.
+    handlers["owmzc"] = [this](const std::vector<std::string>&) { lookUpZipCode(); };
+    handlers["fllcn"] = [this](const std::vector<std::string>&) { lookUpZipCode(); };
+
     handlers["sound"] = [](const std::vector<std::string>&) {
         ESP_LOGW(TAG, "'sound' ignored: the ESP32 build has no audio output");
     };
@@ -330,12 +356,6 @@ void MessageHandler::setupHandlers() {
         const char* phase;
     } pending[] = {
         {"receipconf", "phase 5, settings"},
-        {"owmzc", "phase 4, weather"},
-        {"fllcn", "phase 4, weather"},
-        {"meteo", "phase 4, weather"},
-        {"meteoPrevi", "phase 4, weather"},
-        {"edfJoursTempo", "phase 4, EDF Tempo"},
-        {"perf", "phase 4, performance view"},
     };
     for (const auto& p : pending) {
         const char* action = p.action;
@@ -344,6 +364,20 @@ void MessageHandler::setupHandlers() {
             notPortedYet(action, phase);
         };
     }
+}
+
+void MessageHandler::lookUpZipCode() {
+    OnlineService* service = online;
+    dmdRenderer->renderScene(std::unique_ptr<dmd::Scene>(new GeoScene(
+        dmdRenderer->matrix(), *online, dmdRenderer->defaultStyle().fg, [service](const dmd::GeoResult& g) {
+            ConfigHelper& config = ConfigHelper::getInstance();
+            config.setSetting("OpenWeatherMap", "cityname", g.name);
+            config.setSetting("OpenWeatherMap", "lat", g.lat);
+            config.setSetting("OpenWeatherMap", "lon", g.lon);
+            config.saveConfigFile();
+            service->invalidate();
+            ESP_LOGI(TAG, "OpenWeatherMap location: %s (%s, %s)", g.name.c_str(), g.lat.c_str(), g.lon.c_str());
+        })));
 }
 
 void MessageHandler::playEffect(const std::string& text, const std::string& gif, const std::string& sound) {
@@ -402,6 +436,9 @@ void MessageHandler::applyConf(const std::vector<std::string>& params) {
             config.setSetting(section, key, value);
             changed = true;
             ESP_LOGI(TAG, "conf: [%s] %s = %s", section.c_str(), key.c_str(), value.c_str());
+            if (section == "OpenWeatherMap") {
+                online->invalidate();
+            }
             if (section == "DMDRenderer" && key == "center_images") {
                 dmdRenderer->setCenterImages(value != "0");
             }

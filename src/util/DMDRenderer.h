@@ -4,6 +4,7 @@
 // ESP32 counterpart of Raspy2DMD bin/DMDRenderer.py. Rendering is non-blocking: every call queues
 // a scene on the SceneRunner, and update() (called from loop()) advances the current animation.
 
+#include <memory>
 #include <string>
 
 #include "core/Motion.h"
@@ -56,6 +57,10 @@ public:
     // Score and special-move animations come from here (optional).
     void setMediaLibrary(MediaLibrary* media) { _media = media; }
     void setCenterImages(bool center) { _centerImages = center; }
+
+    // Any other scene (weather, Tempo, perf...).
+    void renderScene(std::unique_ptr<dmd::Scene> scene, uint32_t holdMs = 0);
+    Hub75_Matrix& matrix() { return *_dmd; }
 
     // Port of RunTime(): date and/or time for the configured durations.
     void renderClock(ClockSpec spec, uint32_t holdMs = 0);

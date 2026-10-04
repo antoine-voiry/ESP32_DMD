@@ -11,6 +11,7 @@
 #include "util/LocalWebServer.h"
 #include "util/AttractController.h"
 #include "util/MediaLibrary.h"
+#include "util/OnlineService.h"
 #include "util/Storage.h"
 #include "core/Media.h"
 #include "util/Settings.h"
@@ -32,6 +33,7 @@ MessageFilter* messageFilter = nullptr;
 MQTTHelper* mqttClient= nullptr; 
 TimeService timeService;
 MediaLibrary mediaLibrary;
+OnlineService onlineService;
 AttractController* attract = nullptr;
 LocalWebServer* webServer = nullptr;
 
@@ -154,9 +156,10 @@ void setup() {
     dmdRenderer->setMediaLibrary(&mediaLibrary);
     dmdRenderer->setCenterImages(settings::centerImages());
     timeService.begin(settings::timezone());
-    attract = new AttractController(dmdRenderer, &mediaLibrary);
+    onlineService.begin();
+    attract = new AttractController(dmdRenderer, &mediaLibrary, &onlineService);
     attract->onMessage(millis());  // arms the Running.attract_mode countdown, as RenderFirstStart() did
-    messageHandler = new MessageHandler(dmdRenderer, attract, &timeService, &mediaLibrary);
+    messageHandler = new MessageHandler(dmdRenderer, attract, &timeService, &mediaLibrary, &onlineService);
     messageFilter = new MessageFilter();
 
     // Port of RenderFirstStart(): tell the user where the web interface is.

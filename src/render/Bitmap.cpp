@@ -4,6 +4,7 @@
 #include <PNGdec.h>
 #include <esp_log.h>
 
+#include "TextImage.h"
 #include "core/Media.h"
 #include "util/Storage.h"
 
@@ -87,6 +88,22 @@ std::shared_ptr<Bitmap565> loadPng(const std::string& path, int w, int h, bool c
     }
     ESP_LOGD(TAG, "Loaded %s (%dx%d -> %dx%d)", path.c_str(), ctx.srcW, ctx.srcH, ctx.rect.w, ctx.rect.h);
     return bitmap;
+}
+
+void drawTextBox(dmd::Canvas& canvas, const std::string& text, int x, int y, int w, int h, const dmd::Rgb& color,
+                 int maxFontPx) {
+    if (text.empty() || w <= 0 || h <= 0) return;
+    TextLayoutOptions options;
+    options.maxFontPx = maxFontPx;
+    options.maxCharsPerLine = 64;
+    std::unique_ptr<GFXcanvas1> image = renderTextImage(dmd::toDisplayAscii(text), w, h, options);
+    if (!image) return;
+    const uint16_t c = dmd::rgb565(color.r, color.g, color.b);
+    for (int yy = 0; yy < h; ++yy) {
+        for (int xx = 0; xx < w; ++xx) {
+            if (image->getPixel(xx, yy)) canvas.set(x + xx, y + yy, c);
+        }
+    }
 }
 
 void presentFrame(Hub75_Matrix& matrix, const Bitmap565* background, const GFXcanvas1* text,
