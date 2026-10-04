@@ -11,6 +11,7 @@
 
 #include "AttractController.h"
 #include "DMDRenderer.h"
+#include "MediaLibrary.h"
 #include "TimeService.h"
 
 class MessageHandler {
@@ -20,17 +21,21 @@ private:
     DMDRenderer* dmdRenderer;
     AttractController* attract;
     TimeService* timeService;
+    MediaLibrary* media;
     MessageHandler() = delete;
     void setupHandlers();
     void notPortedYet(const char* action, const char* phase);
     void applyConf(const std::vector<std::string>& params);
+    // RenderSoundEffet(): GIF with text, text, GIF, or (no audio here) nothing.
+    void playEffect(const std::string& text, const std::string& gif, const std::string& sound);
     // "|N" trailing argument at index i (seconds) -> milliseconds, 0 when absent or invalid.
     // Effect duration in seconds at index i -> milliseconds (default 5 s, capped at 10 min).
     static uint32_t effectDuration(const std::vector<std::string>& params, size_t i);
     static uint32_t holdArg(const std::vector<std::string>& params, size_t i);
 
 public:
-    MessageHandler(DMDRenderer* renderer, AttractController* attract, TimeService* timeService);
+    MessageHandler(DMDRenderer* renderer, AttractController* attract, TimeService* timeService,
+                   MediaLibrary* media);
     void handleMessage(const std::string& message);
 };
 #endif

@@ -2,7 +2,7 @@
 #define LOCALWEBSERVER_H
 
 #include <WebServer.h>
-#include <SPIFFS.h>  // Change to SPIFFS
+#include "Storage.h"
 #include <ArduinoJson.h>
 #include <esp_log.h>
 #include <esp_random.h>  // For secure token generation
@@ -35,6 +35,14 @@ private:
     void handleGetConfigJson();
     void handleSaveConfig();
     void handleNotFound();
+    // Media file manager (/files): list, upload into a folder, delete.
+    void handleFiles();
+    void handleUpload();
+    void handleUploadDone();
+    void handleDelete();
+    File uploadFile;
+    String uploadTarget;
+    bool uploadFailed = false;
     
     // Utility methods
     String generateConfigForm(const String& jsonString);

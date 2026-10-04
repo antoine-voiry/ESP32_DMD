@@ -24,6 +24,9 @@ bool parseRgb(const std::string& s, Rgb& out);
 // ASCII ("é" -> "e", "œ" -> "oe", "€" -> "EUR"); anything else becomes '?'.
 std::string toDisplayAscii(const std::string& utf8);
 
+// Escapes & < > " ' for safe inclusion in HTML text and attribute values.
+std::string htmlEscape(const std::string& s);
+
 // Splits on whitespace, collapsing runs (like Python's textwrap does before wrapping).
 std::vector<std::string> splitWords(const std::string& text);
 

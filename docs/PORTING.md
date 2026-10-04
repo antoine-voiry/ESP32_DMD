@@ -25,7 +25,7 @@ A valid payload interrupts the animation on screen, even if its arguments turn o
 | Command | Arguments | Status |
 |---|---|---|
 | `msg` | `text[\|holdSec]` (empty text shows `-Vide-`) | ✅ |
-| `score` | `S20 - T20 - X[\|holdSec]` | ✅ text + special move name; score/special-move GIFs in phase 3 |
+| `score` | `S20 - T20 - X[\|holdSec]` | ✅ GIF from `/scores/<last dart>/`, then `/specialsmoves/<MOVE>/` GIF or the move's name, then the darts |
 | `msgmove` | `text\|sens[\|holdSec]` | ✅ |
 | `msgmovebcl` | `text\|sens\|iterations[\|holdSec]` | ✅ (original slept `iterations` s, a typo; we use `holdSec`) |
 | `msgcolor` | `text\|r;g;b\|r;g;b` | ✅ |
@@ -33,15 +33,22 @@ A valid payload interrupts the animation on screen, even if its arguments turn o
 | `rebt` | – | ✅ `ESP.restart()` |
 | `shutdwn` | – | ✅ blank panel + deep sleep (power cycle to restart) |
 | `testFont` | `font.ttf` | ⚠️ sample text with built-in fonts (no TrueType on ESP32) |
-| `soundeffet` | `text\|gif\|sound` | ⚠️ text part only; GIF in phase 3 |
+| `soundeffet` | `text\|gif\|sound` | ✅ GIF with text, text or GIF (sound ignored: no audio) |
 | `sound` | `file` | ❌ no audio output on this board |
-| `msgimg` | `text\|png` | ⚠️ text only; background PNG in phase 3 |
-| `time` | `start\|stop` | ✅ date and/or time per `ClockRenderer`; background pattern in phase 3 |
+| `msgimg` | `text\|png` | ✅ text centred over a PNG (looked up in `/patterns`) |
+| `time` | `start\|stop` | ✅ date and/or time per `ClockRenderer`, over `/patterns/<clockBackgroundImage>` |
 | `waiter` | `start\|stop\|pause\|resume` | ✅ plays `Running.scrollOrder` while idle (`pause` = `stop`) |
 | `msgcarrou` | `start\|stop` | ✅ random text file from SPIFFS `/textes/` |
-| `testPattern` | `pattern.png` | ⚠️ clock preview without the pattern (phase 3) |
+| `testPattern` | `pattern.png` | ✅ clock preview over that pattern |
 | `rldconf` | – | ✅ re-applies text style, brightness and timezone |
-| `gif`, `gifText`, `gifPath`, `img`, `rand`, `demo`, `effet`, `excludeFolder`, `excludeFile` | | ⏳ phase 3 |
+| `gif` | `name[\|holdSec]` | ✅ looked up in `/gifs` (or as a mapped Pi path), played once |
+| `gifPath` | `/Medias/...[\|holdSec]` | ✅ Pi path mapped to LittleFS (`/Medias/Gifs/x.gif` → `/gifs/x.gif`) |
+| `gifText` | `gif\|text[\|holdSec]` | ✅ text over the GIF (the original read the hold from a missing 4th argument) |
+| `img` | `name[\|holdSec]` | ✅ PNG from `/images`; `WELK.OME` = `/images/Raspy2DMD.png` |
+| `rand` | `gif\|img[\|holdSec]` | ✅ random file, exclusions applied |
+| `demo` | `gif` | ✅ every GIF, each preceded by its name |
+| `effet` | `id` | ✅ from `/effets.txt` (`id\|name\|text\|gif\|sound` per line) instead of MariaDB |
+| `excludeFolder`, `excludeFile` | `name\|path` | ✅ toggles, saved in `/exclusions.txt` |
 | `meteo`, `meteoPrevi`, `owmzc`, `fllcn`, `edfJoursTempo`, `perf` | | ⏳ phase 4 |
 | `receipconf` | | ⏳ phase 5 |
 
@@ -49,17 +56,33 @@ A valid payload interrupts the animation on screen, even if its arguments turn o
 
 ## Attract mode, clock and carousel
 
-- `Running.scrollOrder` codes playable on the ESP32: `T` clock, `4` text carousel, and `F` random `fx` animation
-  (ESP32 extension). `1`/`2` (GIF/image) come with phase 3, `M`/`P`/`E`/`S` with phase 4; they are skipped until then.
-  The Raspy2DMD default `1,T` therefore plays the clock only.
+- `Running.scrollOrder` codes playable on the ESP32: `1` random GIF, `2` random image (4 s), `T` clock, `4` text
+  carousel, and `F` random `fx` animation (ESP32 extension). `M`/`P`/`E`/`S` come with phase 4 and are skipped until then.
 - `Running.attract_mode` (seconds, default 0 = off): attract mode starts by itself after that long without a message.
   Any message stops it.
 - Time comes from NTP; `ClockRenderer.timezone` takes the IANA name used on the Pi (`Europe/Paris`, ...) or a POSIX TZ.
   Date names follow `format_affichage` (`fr_FR` or `en_*`), e.g. `03 oct. 2026` with the default `%d %b %Y`.
 - `DMDRenderer.brightnesshours` (24 values) is applied every hour once the clock is synchronised.
-- Carousel files: SPIFFS folder `/textes/`, same format as on the Pi: first line `;`-separated options
+- Carousel files: folder `/textes/` (any sub-folder), same format as on the Pi: first line `;`-separated options
   (`DG`, `GD`, `HB`, `BH`, `ROT`, `ARO`, `FLI`, `TWI`, `A` random, `ITn` repeats), then the message.
   Static texts are held 4 s.
+
+## Media files
+
+Everything lives on the board's LittleFS partition (~900 KB) and can be managed from the web page `http://<board>/files`
+(upload into a folder, delete). The Pi's `/Medias/<Dir>/` folders become lower-case folders at the root:
+
+| Pi | ESP32 | Used by |
+|---|---|---|
+| `/Medias/Gifs/` | `/gifs/` | `gif`, `rand\|gif`, `demo`, attract `1` |
+| `/Medias/Images/` | `/images/` | `img`, `rand\|img`, attract `2`, start-up logo `Raspy2DMD.png` |
+| `/Medias/Scores/<dart>/` | `/scores/<dart>/` | `score` (last dart that is not `X`) |
+| `/Medias/SpecialsMoves/<MOVE>/` | `/specialsmoves/<MOVE>/` | `score` special moves |
+| `/Medias/Patterns/` | `/patterns/` | clock background, `msgimg`, `testPattern` |
+| `/Medias/Textes/` | `/textes/` | carousel |
+
+GIFs and PNGs are shrunk to fit the panel (never enlarged) and centred when `DMDRenderer.center_images` is 1.
+Keep them panel-sized: decoding a 640x480 HDMI asset works but is slow and wastes flash.
 
 ## Settings
 
@@ -69,9 +92,9 @@ Keys used so far, with the original defaults:
 | Section | Keys |
 |---|---|
 | `TextRenderer` | `defaultfontcolor` (0,0,255), `picturebackgroundcolor` (0,0,0), `maxcharacter` (22), `maxfontsize` |
-| `ClockRenderer` | `showing_datehours` (2), `timeShow_Date` (2), `timeShow_Hours` (4), `format_date` (`%d %b %Y`), `format_hours` (`%H:%M:%S`), `format_affichage` (fr_FR), `timezone` (Europe/Paris), `defaultfontcolor_clock` (0,0,255), `defaultfontcolor_clockshadow` (255,0,0) |
+| `ClockRenderer` | `clockBackgroundImage` (OldGame.png), `showing_datehours` (2), `timeShow_Date` (2), `timeShow_Hours` (4), `format_date` (`%d %b %Y`), `format_hours` (`%H:%M:%S`), `format_affichage` (fr_FR), `timezone` (Europe/Paris), `defaultfontcolor_clock` (0,0,255), `defaultfontcolor_clockshadow` (255,0,0) |
 | `Running` | `scrollOrder` (1,T), `attract_mode` (0) |
-| `DMDRenderer` | `brightness` (90), `brightnesshours` |
+| `DMDRenderer` | `brightness` (90), `brightnesshours`, `center_images` (1) |
 
 ## ESP32 extensions
 
@@ -95,6 +118,6 @@ Special moves in `score` are celebrated: fireworks with rainbow text for `MAXIMU
 
 1. **Core engine**: non-blocking renderer, FIFO messages, text and movements, score, colours, brightness, reboot. ✅
 2. **Clock and attract mode**: NTP time, `time`, `waiter`, `scrollOrder` playlist, `brightnesshours`, text carousel. ✅
-3. **Media**: GIF/PNG from LittleFS, score and special-move animations, effects, exclusions, upload page.
+3. **Media**: GIF/PNG from LittleFS, score and special-move animations, effects, exclusions, upload page. ✅
 4. **Online data**: OpenWeatherMap, EDF Tempo days.
 5. **Settings**: full config schema, `receipconf`/`rldconf`, settings web page.

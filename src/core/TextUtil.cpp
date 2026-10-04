@@ -104,6 +104,22 @@ std::string toDisplayAscii(const std::string& utf8) {
     return out;
 }
 
+std::string htmlEscape(const std::string& s) {
+    std::string out;
+    out.reserve(s.size());
+    for (char c : s) {
+        switch (c) {
+            case '&': out += "&amp;"; break;
+            case '<': out += "&lt;"; break;
+            case '>': out += "&gt;"; break;
+            case '"': out += "&quot;"; break;
+            case '\'': out += "&#39;"; break;
+            default: out += c; break;
+        }
+    }
+    return out;
+}
+
 std::vector<std::string> splitWords(const std::string& text) {
     std::vector<std::string> words;
     std::string current;

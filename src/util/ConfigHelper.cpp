@@ -1,5 +1,5 @@
 /**
- * This file load a configuration file from SPIFFS, parse it and load it into the variables
+ * This file load a configuration file from the board's filesystem (LittleFS), parse it and load it into the variables
  * @param _mqtt_url_str The MQTT URL string to be loaded
  * @param _mqtt_path_str The MQTT path string to be loaded
  * @param _hostname The hostname string to be loaded
@@ -34,7 +34,7 @@ void ConfigHelper::saveConfigFile() {
         settings[kv.first] = kv.second;
     }
      
-    File configFile = SPIFFS.open(JSON_CONFIG_FILE, "w");
+    File configFile = storage().open(JSON_CONFIG_FILE, "w");
     if (!configFile) {
         ESP_LOGE(TAG, "Failed to open config file for writing");
         return;
@@ -52,8 +52,8 @@ void ConfigHelper::saveConfigFile() {
 bool ConfigHelper::initConfigFile() {
     ESP_LOGD(TAG, "Deleting configuration file...");
     
-    if (SPIFFS.exists(JSON_CONFIG_FILE)) {
-        SPIFFS.remove(JSON_CONFIG_FILE);
+    if (storage().exists(JSON_CONFIG_FILE)) {
+        storage().remove(JSON_CONFIG_FILE);
         ESP_LOGD(TAG, "Deleted configuration file");
     } else {
         ESP_LOGW(TAG, "No Config file exists to delete");
@@ -66,12 +66,12 @@ bool ConfigHelper::loadConfigFile() {
     ESP_LOGD(TAG, "Mounting File System...");
     if(_configLoaded) {
        returnFlag =true;
-    }else  if (SPIFFS.begin(false) || SPIFFS.begin(true)) {
+    }else  if (storageBegin()) {
         ESP_LOGD(TAG, "Mounted file system");
         
-        if (SPIFFS.exists(JSON_CONFIG_FILE)) {
+        if (storage().exists(JSON_CONFIG_FILE)) {
             ESP_LOGD(TAG, "Reading config file");
-            File configFile = SPIFFS.open(JSON_CONFIG_FILE, "r");
+            File configFile = storage().open(JSON_CONFIG_FILE, "r");
             
             if (configFile) {
                 ESP_LOGD(TAG, "Opened configuration file");

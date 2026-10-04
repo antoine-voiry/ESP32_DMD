@@ -1,22 +1,24 @@
 #include "AttractController.h"
 
 #include <Arduino.h>
-#include <SPIFFS.h>
 #include <esp_log.h>
 #include <esp_random.h>
 
 #include <vector>
 
 #include "DMDRenderer.h"
+#include "MediaLibrary.h"
 #include "Settings.h"
+#include "Storage.h"
+#include "core/Media.h"
 
 static const char* TAG = "Attract";
 
 namespace {
 
-// Directory.textes on the Pi (/Medias/Textes/); upload carousel files to this SPIFFS folder.
-constexpr const char* kCarouselDir = "/textes";
 constexpr size_t kMaxCarouselFileBytes = 4096;
+// run(): show '2' displays a random image for 4 s.
+constexpr uint32_t kImageShowMs = 4000;
 // The original waits 4 s after a carousel text without options. We also hold static texts that
 // have options, otherwise they would flash by (rendering is much faster than on the Pi).
 constexpr uint32_t kCarouselHoldMs = 4000;
@@ -24,7 +26,8 @@ constexpr uint32_t kFxShowMs = 6000;
 
 }  // namespace
 
-AttractController::AttractController(DMDRenderer* renderer) : _renderer(renderer), _rng(esp_random()) {}
+AttractController::AttractController(DMDRenderer* renderer, MediaLibrary* media)
+    : _renderer(renderer), _media(media), _rng(esp_random()) {}
 
 void AttractController::start(const std::string& codes) {
     _playlist.reset(new dmd::AttractPlaylist(codes, kSupportedCodes));
@@ -74,6 +77,18 @@ void AttractController::loop(uint32_t nowMs) {
 
 bool AttractController::play(char code) {
     switch (code) {
+        case '1': {
+            const std::string gif = _media->randomFile(dmd::media::kGifs, ".gif");
+            if (gif.empty()) return false;
+            _renderer->renderGif(gif);
+            return true;
+        }
+        case '2': {
+            const std::string png = _media->randomFile(dmd::media::kImages, ".png");
+            if (png.empty()) return false;
+            _renderer->renderImage(png, kImageShowMs);
+            return true;
+        }
         case 'T':
             _renderer->renderClock(settings::clockSpec());
             return true;
@@ -95,31 +110,13 @@ bool AttractController::play(char code) {
 }
 
 bool AttractController::playCarousel() {
-    File dir = SPIFFS.open(kCarouselDir);
-    if (!dir || !dir.isDirectory()) {
-        ESP_LOGD(TAG, "No carousel folder %s", kCarouselDir);
+    // Directory.textes on the Pi (/Medias/Textes/, a random file of a random sub-folder).
+    const std::string path = _media->randomFile(dmd::media::kTextes, "");
+    if (path.empty()) {
+        ESP_LOGD(TAG, "No carousel text in %s", dmd::media::kTextes);
         return false;
     }
-    std::vector<std::string> files;
-    for (File f = dir.openNextFile(); f; f = dir.openNextFile()) {
-        if (!f.isDirectory()) {
-            files.push_back(f.path());
-        }
-    }
-    if (files.empty()) {
-        return false;
-    }
-    const std::string& path = files[static_cast<size_t>(_rng.range(0, static_cast<int>(files.size()) - 1))];
-    File file = SPIFFS.open(path.c_str(), "r");
-    if (!file) {
-        ESP_LOGW(TAG, "Cannot open %s", path.c_str());
-        return false;
-    }
-    std::string content;
-    while (file.available() && content.size() < kMaxCarouselFileBytes) {
-        content += static_cast<char>(file.read());
-    }
-    file.close();
+    const std::string content = storageReadText(path, kMaxCarouselFileBytes);
 
     const dmd::CarouselEntry entry = dmd::parseCarouselFile(content);
     if (!entry.valid) {

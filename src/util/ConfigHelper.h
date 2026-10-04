@@ -14,7 +14,7 @@
 // SPI Flash Syetem Library
 #include <map>
 #include <string>
-#include <SPIFFS.h>
+#include "Storage.h"
 #include <Arduino.h>
 #include <FS.h>
 #include <ArduinoJson.h>

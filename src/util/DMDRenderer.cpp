@@ -3,6 +3,8 @@
 #include <memory>
 #include <utility>
 
+#include "MediaLibrary.h"
+#include "core/Media.h"
 #include "core/Protocol.h"
 #include "core/SpecialMoves.h"
 #include "esp_log.h"
@@ -57,10 +59,25 @@ void DMDRenderer::renderScore(const std::string& score, uint32_t holdMs) {
     for (const auto& d : darts) {
         if (d == "X") hasMiss = true;
     }
-    // TODO(phase 3): play a random GIF from Scores/<last dart> and SpecialsMoves/<move> when present.
+    // A random GIF from Scores/<last dart that is not X>/, when there is one.
+    const std::string key = dmd::scoreMediaKey(darts);
+    if (_media && !key.empty()) {
+        const std::string gif = _media->randomFileIn(std::string(dmd::media::kScores) + "/" + key, ".gif");
+        if (!gif.empty()) {
+            renderGif(gif);
+        }
+    }
     if (!hasMiss) {
         const std::string move = dmd::findSpecialMove(darts);
-        if (!move.empty()) {
+        // SpecialsMoves/<MOVE>/: a GIF when there is one, otherwise the move's name.
+        const std::string moveGif =
+            (_media && !move.empty())
+                ? _media->randomFileIn(std::string(dmd::media::kSpecialMoves) + "/" + move, ".gif")
+                : std::string();
+        if (!moveGif.empty()) {
+            ESP_LOGI(TAG, "Special move: %s (%s)", move.c_str(), moveGif.c_str());
+            renderGif(moveGif);
+        } else if (!move.empty()) {
             std::string label = move;
             for (auto& c : label) {
                 if (c == '_') c = ' ';
@@ -93,6 +110,24 @@ void DMDRenderer::renderFx(FxSpec spec, uint32_t holdMs) {
     ESP_LOGD(TAG, "Queue effect (%u ms, hold %u ms)", static_cast<unsigned>(spec.durationMs),
              static_cast<unsigned>(holdMs));
     _runner.enqueue(std::unique_ptr<dmd::Scene>(new FxScene(*_dmd, std::move(spec))), holdMs);
+}
+
+void DMDRenderer::renderGif(const std::string& path, uint32_t holdMs, const std::string& text) {
+    MediaOverlay overlay;
+    overlay.text = text;
+    overlay.color = _defaults.fg;
+    overlay.maxCharsPerLine = _defaults.maxCharsPerLine;
+    overlay.maxFontPx = _defaults.maxFontPx;
+    _runner.enqueue(std::unique_ptr<dmd::Scene>(new GifScene(*_dmd, path, _centerImages, overlay)), holdMs);
+}
+
+void DMDRenderer::renderImage(const std::string& path, uint32_t holdMs, const std::string& text) {
+    MediaOverlay overlay;
+    overlay.text = text;
+    overlay.color = _defaults.fg;
+    overlay.maxCharsPerLine = _defaults.maxCharsPerLine;
+    overlay.maxFontPx = _defaults.maxFontPx;
+    _runner.enqueue(std::unique_ptr<dmd::Scene>(new ImageScene(*_dmd, path, _centerImages, overlay)), holdMs);
 }
 
 void DMDRenderer::renderClock(ClockSpec spec, uint32_t holdMs) {

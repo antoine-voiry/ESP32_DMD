@@ -4,14 +4,17 @@
 
 #include "ConfigHelper.h"
 #include "Settings.h"
+#include "Storage.h"
 #include "core/Fx.h"
+#include "core/Media.h"
 #include "core/Protocol.h"
 #include "esp_log.h"
 
 static const char* TAG = "MessageHandler";
 
-MessageHandler::MessageHandler(DMDRenderer* renderer, AttractController* attract, TimeService* timeService)
-    : dmdRenderer(renderer), attract(attract), timeService(timeService) {
+MessageHandler::MessageHandler(DMDRenderer* renderer, AttractController* attract, TimeService* timeService,
+                               MediaLibrary* media)
+    : dmdRenderer(renderer), attract(attract), timeService(timeService), media(media) {
     ESP_LOGI(TAG, "Initializing MessageHandler");
     setupHandlers();
 }
@@ -98,10 +101,15 @@ void MessageHandler::setupHandlers() {
         dmdRenderer->renderText(request);
     };
 
-    // msgimg|text|/Medias/Patterns/2.png
+    // msgimg|text|/Medias/Patterns/2.png: text centred over a PNG.
     handlers["msgimg"] = [this](const std::vector<std::string>& params) {
-        notPortedYet("msgimg background image", "phase 3, media");
-        dmdRenderer->renderText(params[0]);
+        const std::string png = media->resolve(params[1], dmd::media::kPatterns);
+        if (png.empty()) {
+            ESP_LOGW(TAG, "msgimg: '%s' not found, showing the text only", params[1].c_str());
+            dmdRenderer->renderText(params[0]);
+            return;
+        }
+        dmdRenderer->renderImage(png, 0, params[0]);
     };
 
     // testFont|Font.ttf: the ESP32 has no TrueType fonts, show the sample with the built-in fonts.
@@ -111,13 +119,117 @@ void MessageHandler::setupHandlers() {
         dmdRenderer->renderText("Test de la font");
     };
 
-    // soundeffet|text|gif|sound: no audio on the ESP32; show the text part for now.
+    // soundeffet|text|gif|sound
     handlers["soundeffet"] = [this](const std::vector<std::string>& params) {
-        if (!params[0].empty()) {
-            dmdRenderer->renderText(params[0]);
-        } else {
-            notPortedYet("soundeffet without text", "phase 3, media");
+        playEffect(params[0], params[1], params[2]);
+    };
+
+    // effet|12: effect from /effets.txt ("id|name|text|gif|sound" per line).
+    handlers["effet"] = [this](const std::vector<std::string>& params) {
+        dmd::Effect effect;
+        if (!media->findEffect(params[0], effect)) {
+            ESP_LOGW(TAG, "effet: no effect '%s' in %s", params[0].c_str(), MediaLibrary::kEffectsFile);
+            return;
         }
+        playEffect(effect.text, effect.gif, effect.sound);
+    };
+
+    ////////////////////////////////////////////////////////////////////////////
+    // GIFs and images (phase 3)
+
+    // gif|Gifs/Gif.gif|2
+    handlers["gif"] = [this](const std::vector<std::string>& params) {
+        const std::string path = media->resolve(params[0], dmd::media::kGifs);
+        if (path.empty()) {
+            ESP_LOGW(TAG, "gif: '%s' not found", params[0].c_str());
+            return;
+        }
+        dmdRenderer->renderGif(path, params.size() == 2 ? holdArg(params, 1) : 0);
+    };
+
+    // gifPath|/Medias/Gifs/x.gif|2
+    handlers["gifPath"] = [this](const std::vector<std::string>& params) {
+        const std::string path = dmd::mapPiPath(params[0]);
+        if (!storageExists(path)) {
+            ESP_LOGW(TAG, "gifPath: '%s' (%s) not found", params[0].c_str(), path.c_str());
+            return;
+        }
+        dmdRenderer->renderGif(path, params.size() == 2 ? holdArg(params, 1) : 0);
+    };
+
+    // gifText|Gifs/Gif.gif|Bla bla bla|2 (the original slept action[3] with 3 arguments, an
+    // IndexError; the 3rd argument is the hold here)
+    handlers["gifText"] = [this](const std::vector<std::string>& params) {
+        if (params[0].empty()) {
+            dmdRenderer->renderText("Veuillez faire un choix pour votre gif");
+            return;
+        }
+        if (params[1].empty()) {
+            dmdRenderer->renderText("Veuillez indiquer un texte a afficher");
+            return;
+        }
+        const std::string path = media->resolve(params[0], dmd::media::kGifs);
+        if (path.empty()) {
+            ESP_LOGW(TAG, "gifText: '%s' not found", params[0].c_str());
+            return;
+        }
+        dmdRenderer->renderGif(path, params.size() == 3 ? holdArg(params, 2) : 0, params[1]);
+    };
+
+    // img|Images/Image.png|2 ("WELK.OME" is the welcome image)
+    handlers["img"] = [this](const std::vector<std::string>& params) {
+        if (params[0].empty()) {
+            dmdRenderer->renderText("Veuillez faire un choix pour votre image");
+            return;
+        }
+        const std::string wanted = params[0] == "WELK.OME" ? "Raspy2DMD.png" : params[0];
+        const std::string path = media->resolve(wanted, dmd::media::kImages);
+        if (path.empty()) {
+            ESP_LOGW(TAG, "img: '%s' not found", params[0].c_str());
+            return;
+        }
+        dmdRenderer->renderImage(path, params.size() == 2 ? holdArg(params, 1) : 0);
+    };
+
+    // rand|gif|2 or rand|img|2
+    handlers["rand"] = [this](const std::vector<std::string>& params) {
+        const uint32_t hold = params.size() == 2 ? holdArg(params, 1) : 0;
+        if (params[0] == "gif") {
+            const std::string path = media->randomFile(dmd::media::kGifs, ".gif");
+            if (path.empty()) {
+                ESP_LOGW(TAG, "rand: no GIF in %s", dmd::media::kGifs);
+                return;
+            }
+            dmdRenderer->renderGif(path, hold);
+        } else if (params[0] == "img") {
+            const std::string path = media->randomFile(dmd::media::kImages, ".png");
+            if (path.empty()) {
+                ESP_LOGW(TAG, "rand: no PNG in %s", dmd::media::kImages);
+                return;
+            }
+            dmdRenderer->renderImage(path, hold);
+        }
+    };
+
+    // demo|gif: every GIF, each preceded by its name.
+    handlers["demo"] = [this](const std::vector<std::string>& params) {
+        if (params[0] != "gif") {
+            return;
+        }
+        constexpr size_t kMaxDemoGifs = 200;
+        const std::vector<std::string> gifs = media->allGifs();
+        for (size_t i = 0; i < gifs.size() && i < kMaxDemoGifs; ++i) {
+            dmdRenderer->renderText(dmd::baseName(gifs[i]), 500);
+            dmdRenderer->renderGif(gifs[i], 500);
+        }
+    };
+
+    // excludeFolder|DirName|DirPath and excludeFile|FileName|FilePath (toggle)
+    handlers["excludeFolder"] = [this](const std::vector<std::string>& params) {
+        media->toggleExclusion(true, params[0], params[1]);
+    };
+    handlers["excludeFile"] = [this](const std::vector<std::string>& params) {
+        media->toggleExclusion(false, params[0], params[1]);
     };
 
     ////////////////////////////////////////////////////////////////////////////
@@ -168,11 +280,14 @@ void MessageHandler::setupHandlers() {
         }
     };
 
-    // testPattern|Modele01.png: clock preview; the pattern itself needs PNG support (phase 3).
+    // testPattern|Modele01.png: clock preview over that pattern.
     handlers["testPattern"] = [this](const std::vector<std::string>& params) {
-        ESP_LOGW(TAG, "testPattern '%s': background patterns need media support (phase 3)", params[0].c_str());
         ClockSpec spec = settings::clockSpec();
         spec.mode = 2;
+        spec.pattern = media->resolve(params[0], dmd::media::kPatterns);
+        if (spec.pattern.empty()) {
+            ESP_LOGW(TAG, "testPattern: '%s' not found", params[0].c_str());
+        }
         dmdRenderer->renderClock(spec);
     };
 
@@ -215,15 +330,6 @@ void MessageHandler::setupHandlers() {
         const char* phase;
     } pending[] = {
         {"receipconf", "phase 5, settings"},
-        {"excludeFolder", "phase 3, media"},
-        {"excludeFile", "phase 3, media"},
-        {"rand", "phase 3, media"},
-        {"demo", "phase 3, media"},
-        {"gif", "phase 3, media"},
-        {"gifText", "phase 3, media"},
-        {"gifPath", "phase 3, media"},
-        {"img", "phase 3, media"},
-        {"effet", "phase 3, media"},
         {"owmzc", "phase 4, weather"},
         {"fllcn", "phase 4, weather"},
         {"meteo", "phase 4, weather"},
@@ -237,6 +343,29 @@ void MessageHandler::setupHandlers() {
         handlers[action] = [this, action, phase](const std::vector<std::string>&) {
             notPortedYet(action, phase);
         };
+    }
+}
+
+void MessageHandler::playEffect(const std::string& text, const std::string& gif, const std::string& sound) {
+    const std::string path = gif.empty() ? "" : media->resolve(gif, dmd::media::kGifs);
+    if (!gif.empty() && path.empty()) {
+        ESP_LOGW(TAG, "Effect GIF '%s' not found", gif.c_str());
+    }
+    switch (dmd::effectKind(text, path, sound)) {
+        case dmd::EffectKind::GifWithText:
+            dmdRenderer->renderGif(path, 0, text);
+            break;
+        case dmd::EffectKind::Text:
+            dmdRenderer->renderText(text);
+            break;
+        case dmd::EffectKind::Gif:
+            dmdRenderer->renderGif(path);
+            break;
+        case dmd::EffectKind::SoundOnly:
+            ESP_LOGW(TAG, "Effect sound '%s' ignored: no audio output", sound.c_str());
+            break;
+        case dmd::EffectKind::Nothing:
+            break;
     }
 }
 
@@ -273,6 +402,9 @@ void MessageHandler::applyConf(const std::vector<std::string>& params) {
             config.setSetting(section, key, value);
             changed = true;
             ESP_LOGI(TAG, "conf: [%s] %s = %s", section.c_str(), key.c_str(), value.c_str());
+            if (section == "DMDRenderer" && key == "center_images") {
+                dmdRenderer->setCenterImages(value != "0");
+            }
             if (section == "ClockRenderer" && key == "timezone") {
                 timeService->begin(settings::timezone());
                 timeService->invalidate();

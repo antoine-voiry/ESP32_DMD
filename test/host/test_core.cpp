@@ -8,6 +8,7 @@
 #include "core/Attract.h"
 #include "core/Clock.h"
 #include "core/Fx.h"
+#include "core/Media.h"
 #include "core/Motion.h"
 #include "core/Protocol.h"
 #include "core/SceneRunner.h"
@@ -385,6 +386,114 @@ static void testAttract() {
     CHECK(!t.expired(40000));   // fires once per touch
 }
 
+static void testMediaPaths() {
+    CHECK_EQ(mapPiPath("/Medias/Gifs/fun/a.gif"), std::string("/gifs/fun/a.gif"));
+    CHECK_EQ(mapPiPath("/Medias/SpecialsMoves/RED_HAT"), std::string("/specialsmoves/RED_HAT"));
+    CHECK_EQ(mapPiPath("Gifs//x.gif"), std::string("/Gifs/x.gif"));
+    CHECK_EQ(mapPiPath("\\gifs\\x.gif"), std::string("/gifs/x.gif"));
+    CHECK_EQ(mapPiPath("/gifs/dir/"), std::string("/gifs/dir"));
+
+    std::vector<std::string> fs = {"/gifs/a.gif", "/gifs/Gifs/b.gif", "/gifs/c.gif", "/images/i.png"};
+    auto exists = [&](const std::string& p) { return std::find(fs.begin(), fs.end(), p) != fs.end(); };
+    CHECK_EQ(resolveMedia("a.gif", "/gifs", exists), std::string("/gifs/a.gif"));
+    CHECK_EQ(resolveMedia("Gifs/b.gif", "/gifs", exists), std::string("/gifs/Gifs/b.gif"));
+    CHECK_EQ(resolveMedia("Gifs/c.gif", "/gifs", exists), std::string("/gifs/c.gif"));  // lower-cased folder
+    CHECK_EQ(resolveMedia("/Medias/Images/i.png", "/gifs", exists), std::string("/images/i.png"));
+    CHECK_EQ(resolveMedia("nope.gif", "/gifs", exists), std::string(""));
+    CHECK_EQ(resolveMedia("", "/gifs", exists), std::string(""));
+
+    CHECK(isGifFile("/gifs/A.GIF"));
+    CHECK(isPngFile("x.Png"));
+    CHECK(!isGifFile("/gifs/gif"));
+    CHECK_EQ(lowerExtension("/a.b/c"), std::string(""));
+    CHECK_EQ(baseName("/gifs/a/b.gif"), std::string("b.gif"));
+    CHECK_EQ(parentDir("/gifs/a/b.gif"), std::string("/gifs/a"));
+    CHECK_EQ(parentDir("/x.gif"), std::string("/"));
+}
+
+static void testExclusions() {
+    ExclusionList ex;
+    CHECK(ex.toggle(true, "fun", "/Medias/Gifs/fun"));
+    CHECK(ex.toggle(false, "b.gif", "/Medias/Gifs/b.gif"));
+    CHECK(ex.isExcluded("/gifs/fun/x.gif"));
+    CHECK(ex.isExcluded("/gifs/fun/deep/y.gif"));
+    CHECK(!ex.isExcluded("/gifs/funny/x.gif"));  // prefix must stop at a folder boundary
+    CHECK(ex.isExcluded("/gifs/b.gif"));
+    CHECK(!ex.isExcluded("/gifs/a.gif"));
+
+    ExclusionList copy;
+    copy.parse(ex.serialize() + "# comment\nbad line\n");
+    CHECK_EQ(copy.entries().size(), 2u);
+    CHECK(copy.isExcluded("/gifs/fun/x.gif"));
+
+    CHECK(!ex.toggle(true, "fun", "/Medias/Gifs/fun"));  // toggling again removes it
+    CHECK(!ex.isExcluded("/gifs/fun/x.gif"));
+
+    std::vector<std::string> files = {"/gifs/a.gif", "/gifs/b.gif", "/gifs/fun/x.gif"};
+    CHECK_EQ(filterExcluded(files, copy).size(), 1u);
+}
+
+static void testEffects() {
+    const std::string table = "# id|name|text|gif|sound\n12|Bravo|Bien joue !|bravo.gif|pop.ogg\n13|Gif only||x.gif|\n14|Short\n";
+    Effect e;
+    CHECK(findEffect(table, "12", e));
+    CHECK_EQ(e.text, std::string("Bien joue !"));
+    CHECK_EQ(e.gif, std::string("bravo.gif"));
+    CHECK_EQ(e.sound, std::string("pop.ogg"));
+    CHECK(findEffect(table, " 14 ", e));
+    CHECK_EQ(e.text, std::string(""));
+    CHECK(!findEffect(table, "99", e));
+    CHECK(effectKind("t", "g", "") == EffectKind::GifWithText);
+    CHECK(effectKind("t", "", "s") == EffectKind::Text);
+    CHECK(effectKind("", "g", "s") == EffectKind::Gif);
+    CHECK(effectKind("", "", "s") == EffectKind::SoundOnly);
+    CHECK(effectKind("", "", "") == EffectKind::Nothing);
+}
+
+static void testFitAndUpload() {
+    FitRect r = fitImage(64, 32, 64, 32, true);
+    CHECK(r.x == 0 && r.y == 0 && r.w == 64 && r.h == 32);
+    r = fitImage(32, 16, 64, 32, true);  // never enlarged, centred
+    CHECK(r.x == 16 && r.y == 8 && r.w == 32 && r.h == 16);
+    r = fitImage(32, 16, 64, 32, false);
+    CHECK(r.x == 0 && r.y == 0);
+    r = fitImage(128, 32, 64, 32, true);  // 2:1 wider panel image -> 64x16
+    CHECK(r.w == 64 && r.h == 16 && r.y == 8);
+    r = fitImage(640, 480, 64, 32, true);  // HDMI-sized image -> 43x32
+    CHECK(r.h == 32 && r.w == 43 && r.x == 10);
+    r = fitImage(0, 10, 64, 32, true);
+    CHECK(r.w == 0);
+
+    // Every destination row is produced exactly once, whatever the scale.
+    const int sizes[][2] = {{32, 32}, {480, 32}, {16, 32}, {33, 32}, {7, 3}};
+    for (const auto& sz : sizes) {
+        std::vector<int> hits(static_cast<size_t>(sz[1]), 0);
+        for (int sr = 0; sr < sz[0]; ++sr) {
+            int first = 0, count = 0;
+            destRows(sr, sz[0], sz[1], first, count);
+            for (int d = first; d < first + count; ++d) {
+                hits[static_cast<size_t>(d)]++;
+                CHECK_EQ(srcIndex(d, sz[0], sz[1]), sr);
+            }
+        }
+        for (int h : hits) CHECK_EQ(h, 1);
+    }
+    int f0 = 0, c0 = 0;
+    destRows(5, 0, 32, f0, c0);
+    CHECK_EQ(c0, 0);
+
+    CHECK_EQ(scoreMediaKey({"S20", "T20", "X"}), std::string("T20"));
+    CHECK_EQ(scoreMediaKey({"X", "X", "X"}), std::string(""));
+
+    CHECK_EQ(uploadPath("/gifs", "my fun.gif"), std::string("/gifs/my_fun.gif"));
+    CHECK_EQ(uploadPath("/gifs", "../../config.json"), std::string("/gifs/config.json"));
+    CHECK_EQ(uploadPath("/gifs/../", "a.gif"), std::string(""));
+    CHECK_EQ(uploadPath("/gifs", ".."), std::string(""));
+    CHECK_EQ(uploadPath("/", "effets.txt"), std::string("/effets.txt"));
+    CHECK_EQ(uploadPath("/gi fs", "a.gif"), std::string(""));
+    CHECK_EQ(htmlEscape("<a href='x'>&\"</a>"), std::string("&lt;a href=&#39;x&#39;&gt;&amp;&quot;&lt;/a&gt;"));
+}
+
 int main() {
     testParseCommand();
     testFilter();
@@ -399,6 +508,10 @@ int main() {
     testStarsAndRain();
     testClockFormat();
     testAttract();
+    testMediaPaths();
+    testExclusions();
+    testEffects();
+    testFitAndUpload();
     std::printf("%d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }

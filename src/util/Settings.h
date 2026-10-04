@@ -18,6 +18,9 @@ std::string timezone();  // POSIX TZ string for configTzTime()
 // [TextRenderer] defaults for every text command.
 TextStyle textStyle();
 
+// [DMDRenderer] center_images (default 1).
+bool centerImages();
+
 // [Running]
 std::string scrollOrder();
 uint32_t attractAfterMs();  // attract_mode seconds -> ms, 0 = disabled
