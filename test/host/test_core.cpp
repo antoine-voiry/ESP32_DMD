@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "check.h"
 #include "core/Attract.h"
 #include "core/Canvas.h"
 #include "core/Clock.h"
@@ -18,27 +19,9 @@
 #include "core/SceneRunner.h"
 #include "core/SpecialMoves.h"
 #include "core/TextUtil.h"
+#include "core/WebGuard.h"
 
-static int g_failures = 0;
-static int g_checks = 0;
-
-#define CHECK(cond)                                                              \
-    do {                                                                         \
-        ++g_checks;                                                              \
-        if (!(cond)) {                                                           \
-            ++g_failures;                                                        \
-            std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);          \
-        }                                                                        \
-    } while (0)
-
-#define CHECK_EQ(a, b)                                                           \
-    do {                                                                         \
-        ++g_checks;                                                              \
-        if (!((a) == (b))) {                                                     \
-            ++g_failures;                                                        \
-            std::printf("FAIL %s:%d: %s == %s\n", __FILE__, __LINE__, #a, #b);   \
-        }                                                                        \
-    } while (0)
+TEST_MAIN_COUNTERS;
 
 using namespace dmd;
 
@@ -115,6 +98,18 @@ static void testAscii() {
     CHECK_EQ(toDisplayAscii("C\xC5\x93ur \xC3\xA0 100\xE2\x82\xAC"), std::string("Coeur a 100EUR"));
     CHECK_EQ(toDisplayAscii("a\nb"), std::string("a b"));
     CHECK_EQ(toDisplayAscii("\xF0\x9F\x8E\xAF"), std::string("?"));  // emoji
+    // Every mapped character (French text from Raspydarts).
+    CHECK_EQ(toDisplayAscii("\u00C0\u00C1\u00C2\u00C3\u00C4\u00C5\u00C6\u00C7\u00C8\u00C9\u00CA\u00CB"
+                            "\u00CC\u00CD\u00CE\u00CF\u00D1\u00D2\u00D3\u00D4\u00D5\u00D6\u00D8\u00D9"
+                            "\u00DA\u00DB\u00DC\u00DD\u00DF"),
+             std::string("AAAAAAAECEEEEIIIINOOOOOOUUUUYss"));
+    CHECK_EQ(toDisplayAscii("\u00E0\u00E1\u00E2\u00E3\u00E4\u00E5\u00E6\u00E7\u00E8\u00E9\u00EA\u00EB"
+                            "\u00EC\u00ED\u00EE\u00EF\u00F1\u00F2\u00F3\u00F4\u00F5\u00F6\u00F8\u00F9"
+                            "\u00FA\u00FB\u00FC\u00FD\u00FF"),
+             std::string("aaaaaaaeceeeeiiiinoooooouuuuyy"));
+    CHECK_EQ(toDisplayAscii("\u0152\u0153\u0178\u00A0\u00AB\u00BB\u201C\u201D\u2018\u2019\u2013\u2014"
+                            "\u2026\u00B0\u20AC"),
+             std::string("OEoeY \"\"\"\"''--...oEUR"));
 }
 
 static void testWrap() {
@@ -745,6 +740,35 @@ static void testFxRender() {
     CHECK_EQ(c.count(0), 64 * 32);
 }
 
+static void testWebGuard() {
+    CHECK_EQ(hostWithoutPort("DMD.local:80"), std::string("dmd.local"));
+    CHECK_EQ(hostWithoutPort("[::1]:8080"), std::string("[::1]"));
+    CHECK_EQ(hostWithoutPort("[::1"), std::string("[::1"));
+    CHECK_EQ(hostWithoutPort("10.0.0.2"), std::string("10.0.0.2"));
+
+    const std::string ip = "192.168.1.42";
+    CHECK(hostAllowed("", ip, "dmd"));
+    CHECK(hostAllowed("192.168.1.42:80", ip, "dmd"));
+    CHECK(hostAllowed("DMD", ip, "dmd"));
+    CHECK(hostAllowed("DMD.Local", ip, "dmd"));
+    CHECK(hostAllowed("dmd.fritz.box:80", ip, "Dmd"));
+    CHECK(!hostAllowed("dmdx.local", ip, "dmd"));
+    CHECK(!hostAllowed("evil.example", ip, "dmd"));
+    CHECK(!hostAllowed("evil.example", ip, ""));
+    CHECK(!hostAllowed("192.168.1.42.evil.example", ip, "dmd"));
+    CHECK(!hostAllowed("192.168.1.420", ip, "dmd"));
+    CHECK(!hostAllowed("0.0.0.0", "", ""));
+
+    CHECK(originAllowed("", ip, "dmd"));
+    CHECK(originAllowed("http://dmd.local", ip, "dmd"));
+    CHECK(originAllowed("http://192.168.1.42:80", ip, "dmd"));
+    CHECK(!originAllowed("null", ip, "dmd"));
+    CHECK(!originAllowed("https://dmd.local", ip, "dmd"));
+    CHECK(!originAllowed("http://", ip, "dmd"));
+    CHECK(!originAllowed("http://dmd.local/path", ip, "dmd"));
+    CHECK(!originAllowed("http://evil.example", ip, "dmd"));
+}
+
 int main() {
     testParseCommand();
     testFilter();
@@ -771,6 +795,6 @@ int main() {
     testOnlineDrawing();
     testConfigSchema();
     testFxRender();
-    std::printf("%d checks, %d failures\n", g_checks, g_failures);
-    return g_failures == 0 ? 0 : 1;
+    testWebGuard();
+    return TEST_REPORT();
 }

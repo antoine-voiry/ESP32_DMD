@@ -11,16 +11,26 @@ permissions:
 
 jobs:
   host-tests:
-    name: Host unit tests
+    name: Host tests and coverage
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Run core unit tests
-        run: make -C test/host
-      - name: Run JSON parser tests (ArduinoJson)
-        run: |
-          git clone --depth 1 --branch v7.4.3 https://github.com/bblanchon/ArduinoJson.git "$RUNNER_TEMP/ArduinoJson"
-          make -C test/host json ARDUINOJSON="$RUNNER_TEMP/ArduinoJson/src"
+      - uses: actions/cache@v4
+        with:
+          path: test/host/deps
+          key: host-deps-${{ hashFiles('test/host/Makefile') }}
+      - name: Install gcovr
+        run: pip install gcovr
+      - name: Core, JSON and firmware tests (ASan + UBSan)
+        run: make -C test/host all
+      - name: Line coverage of src/ (fails under 90 %)
+        run: make -C test/host coverage
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: test/host/build/coverage.txt
 
   firmware:
     name: ESP32 firmware
