@@ -1,0 +1,240 @@
+// Host-side unit tests for src/core (no Arduino needed). Run: make -C test/host
+#include <cstdio>
+#include <memory>
+#include <string>
+#include <vector>
+
+#include "core/Motion.h"
+#include "core/Protocol.h"
+#include "core/SceneRunner.h"
+#include "core/SpecialMoves.h"
+#include "core/TextUtil.h"
+
+static int g_failures = 0;
+static int g_checks = 0;
+
+#define CHECK(cond)                                                              \
+    do {                                                                         \
+        ++g_checks;                                                              \
+        if (!(cond)) {                                                           \
+            ++g_failures;                                                        \
+            std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);          \
+        }                                                                        \
+    } while (0)
+
+#define CHECK_EQ(a, b)                                                           \
+    do {                                                                         \
+        ++g_checks;                                                              \
+        if (!((a) == (b))) {                                                     \
+            ++g_failures;                                                        \
+            std::printf("FAIL %s:%d: %s == %s\n", __FILE__, __LINE__, #a, #b);   \
+        }                                                                        \
+    } while (0)
+
+using namespace dmd;
+
+static void testParseCommand() {
+    Command c;
+    CHECK(parseCommand("msg|Hello|3", c));
+    CHECK_EQ(c.action, std::string("msg"));
+    CHECK_EQ(c.args.size(), 2u);
+    CHECK_EQ(c.args[0], std::string("Hello"));
+    CHECK_EQ(c.args[1], std::string("3"));
+
+    CHECK(parseCommand("msg|", c));
+    CHECK_EQ(c.args.size(), 1u);
+    CHECK_EQ(c.args[0], std::string(""));
+
+    CHECK(parseCommand("conf|DMDRenderer|brightness:50", c));
+    CHECK_EQ(c.args[0], std::string("DMDRenderer"));
+    CHECK_EQ(c.args[1], std::string("brightness:50"));
+
+    CHECK(!parseCommand("msg", c));
+}
+
+static void testFilter() {
+    CHECK(isAcceptedPayload("msg|Hello"));
+    CHECK(isAcceptedPayload("rebt|"));
+    CHECK(!isAcceptedPayload("rebt"));           // no '|' -> rejected like the original
+    CHECK(!isAcceptedPayload("unknown|x"));
+    CHECK(isAcceptedPayload("score|S20 - T20 - X"));
+    CHECK(isAcceptedPayload("score|sb - db - t1"));  // case-insensitive
+    CHECK(!isAcceptedPayload("score|S21 - T20 - X"));
+    CHECK(!isAcceptedPayload("score|S20-T20-X"));    // wrong separator
+    CHECK(!isAcceptedPayload("score|S05 - T20 - X"));
+    CHECK(!isAcceptedPayload("score|"));
+    CHECK_EQ(minArgs("msgmovebcl"), 3u);
+    CHECK_EQ(minArgs("msgcolor"), 3u);
+    CHECK_EQ(minArgs("rebt"), 0u);
+    CHECK_EQ(parseIntArg("3", 0), 3);
+    CHECK_EQ(parseIntArg("x", 7), 7);
+    CHECK_EQ(parseIntArg("", 7), 7);
+}
+
+static void testSpecialMoves() {
+    auto sm = [](const char* s) { return findSpecialMove(splitScore(s)); };
+    CHECK_EQ(sm("T20 - T20 - T20"), std::string("MAXIMUM_TON_80"));
+    CHECK_EQ(sm("DB - DB - DB"), std::string("BLACK_HAT_THREE_IN_THE_BLACK"));
+    CHECK_EQ(sm("SB - SB - SB"), std::string("RED_HAT"));
+    CHECK_EQ(sm("SB - DB - SB"), std::string("HAT_TRICK"));
+    CHECK_EQ(sm("S20 - S1 - S5"), std::string("BREAKFAST"));
+    CHECK_EQ(sm("T5 - T20 - T1"), std::string("CHAMPAGNE_BREAKFAST"));
+    CHECK_EQ(sm("S12 - S20 - S5"), std::string("NOT_OLD"));
+    CHECK_EQ(sm("S20 - S20 - S20"), std::string("THREE_IN_A_BED"));  // before STEADY (60)
+    CHECK_EQ(sm("S1 - S2 - S3"), std::string("CIRCLE_IT"));
+    CHECK_EQ(sm("T20 - T20 - S20"), std::string("LOW_TON"));          // 140
+    CHECK_EQ(sm("T20 - T20 - T19"), std::string("HIGH_TON"));         // 177
+    CHECK_EQ(sm("S10 - S11 - S1"), std::string("DINKY_DOO"));         // 22
+    CHECK_EQ(sm("S10 - S11 - S2"), std::string(""));                  // 23
+    CHECK_EQ(findSpecialMove({"T20", "T20"}), std::string(""));       // needs 3 darts
+}
+
+static void testRgb() {
+    Rgb c;
+    CHECK(parseRgb("0,0,255", c));
+    CHECK(c.r == 0 && c.g == 0 && c.b == 255);
+    CHECK(parseRgb("255;128;7", c));
+    CHECK(c.r == 255 && c.g == 128 && c.b == 7);
+    CHECK(parseRgb("300;-1;5", c));
+    CHECK(c.r == 255 && c.g == 0 && c.b == 5);
+    CHECK(!parseRgb("1,2", c));
+    CHECK(!parseRgb("a,b,c", c));
+}
+
+static void testAscii() {
+    CHECK_EQ(toDisplayAscii("Fl\xC3\xA9" "chette"), std::string("Flechette"));      // é
+    CHECK_EQ(toDisplayAscii("C\xC5\x93ur \xC3\xA0 100\xE2\x82\xAC"), std::string("Coeur a 100EUR"));
+    CHECK_EQ(toDisplayAscii("a\nb"), std::string("a b"));
+    CHECK_EQ(toDisplayAscii("\xF0\x9F\x8E\xAF"), std::string("?"));  // emoji
+}
+
+static void testWrap() {
+    auto mono = [](const std::string& s) { return static_cast<int>(s.size()) * 6; };
+    auto lines = wrapText("Hello  big world", 64, 22, mono);  // 10 chars per line
+    CHECK_EQ(lines.size(), 2u);
+    CHECK_EQ(lines[0], std::string("Hello big"));
+    CHECK_EQ(lines[1], std::string("world"));
+
+    lines = wrapText("abcdefghijklmnop", 30, 22, mono);  // 5 chars per line, long word broken
+    CHECK_EQ(lines.size(), 4u);
+    CHECK_EQ(lines[0], std::string("abcde"));
+    CHECK_EQ(lines[3], std::string("p"));
+
+    lines = wrapText("aa bb cc", 1000, 5, mono);  // character cap
+    CHECK_EQ(lines.size(), 2u);
+    CHECK_EQ(lines[0], std::string("aa bb"));
+}
+
+static void testTimeline() {
+    Timeline left(Motion::Left, 100, 32, 64, 32);
+    CHECK_EQ(left.size(), 164u);
+    CHECK_EQ(left.at(0).x, 64);
+    CHECK_EQ(left.at(163).x, -99);
+    CHECK_EQ(left.at(0).delayMs, 10);
+
+    Timeline right(Motion::Right, 100, 32, 64, 32, 2);
+    CHECK_EQ(right.size(), 328u);
+    CHECK_EQ(right.at(0).x, -100);
+    CHECK_EQ(right.at(164).x, -100);  // second iteration restarts
+
+    Timeline up(Motion::Up, 64, 32, 64, 32);
+    CHECK_EQ(up.size(), 64u);
+    CHECK_EQ(up.at(0).y, 32);
+    CHECK_EQ(up.at(63).y, -31);
+
+    Timeline down(Motion::Down, 64, 32, 64, 32);
+    CHECK_EQ(down.at(0).y, -32);
+    CHECK_EQ(down.at(63).y, 31);
+
+    Timeline rot(Motion::Rotate, 64, 32, 64, 32);
+    CHECK_EQ(rot.size(), 9u);
+    CHECK_EQ(rot.at(0).angle, 360);
+    CHECK_EQ(rot.at(8).angle, 0);
+
+    Timeline flip(Motion::Flip, 64, 32, 64, 32);
+    CHECK_EQ(flip.size(), static_cast<size_t>(1 + 32 + 31 + 32 + 31 + 1));
+    CHECK_EQ(flip.at(1).h, 32);   // starts shrinking from full height
+    CHECK_EQ(flip.at(32).h, 1);
+    CHECK(flip.at(33).flipY);     // unfolds mirrored
+    Frame last = flip.at(flip.size() - 1);
+    CHECK(!last.flipY && last.h == 32 && last.y == 0);
+
+    Timeline none(Motion::None, 64, 32, 64, 32, 5);
+    CHECK_EQ(none.size(), 1u);
+    CHECK_EQ(parseMotion("twirl") == Motion::Twirl, true);
+    CHECK_EQ(parseMotion("sideways") == Motion::None, true);
+}
+
+// Scene that animates for a fixed number of ticks and records what happened.
+struct FakeScene : Scene {
+    FakeScene(std::vector<std::string>& log, std::string name, int frames)
+        : log(log), name(std::move(name)), frames(frames) {}
+    void start(uint32_t) override { log.push_back(name + ":start"); }
+    bool tick(uint32_t) override { return --frames > 0; }
+    void abort() override { log.push_back(name + ":abort"); }
+    std::vector<std::string>& log;
+    std::string name;
+    int frames;
+};
+
+static void testSceneRunner() {
+    std::vector<std::string> log;
+    SceneRunner r;
+    CHECK(r.idle(0));
+
+    // Long animation interrupted by a new message.
+    r.enqueue(std::make_unique<FakeScene>(log, "scroll", 100));
+    r.update(0);
+    CHECK(r.animating());
+    r.interrupt();
+    r.enqueue(std::make_unique<FakeScene>(log, "msg", 1), 3000);
+    r.update(10);
+    CHECK_EQ(log.size(), 3u);
+    CHECK_EQ(log[1], std::string("scroll:abort"));
+    CHECK_EQ(log[2], std::string("msg:start"));
+
+    // "msg|...|3": the hold is not interrupted, the next message waits.
+    r.interrupt();
+    r.enqueue(std::make_unique<FakeScene>(log, "next", 1));
+    r.update(1000);
+    CHECK_EQ(log.size(), 3u);
+    CHECK(!r.idle(1000));
+    r.update(3010);
+    CHECK_EQ(log.size(), 4u);
+    CHECK_EQ(log[3], std::string("next:start"));
+    CHECK(r.idle(3010));
+
+    // FIFO order.
+    log.clear();
+    r.enqueue(std::make_unique<FakeScene>(log, "a", 2));
+    r.enqueue(std::make_unique<FakeScene>(log, "b", 1));
+    r.update(4000);
+    CHECK_EQ(log.size(), 1u);
+    r.update(4010);
+    CHECK_EQ(log.size(), 2u);
+    CHECK_EQ(log[1], std::string("b:start"));
+
+    // millis() wrap-around during a hold.
+    SceneRunner w;
+    log.clear();
+    w.enqueue(std::make_unique<FakeScene>(log, "x", 1), 100);
+    w.enqueue(std::make_unique<FakeScene>(log, "y", 1));
+    w.update(0xFFFFFFF0u);
+    w.update(0x10u);  // only 32 ms later
+    CHECK_EQ(log.size(), 1u);
+    w.update(0x60u);
+    CHECK_EQ(log.size(), 2u);
+}
+
+int main() {
+    testParseCommand();
+    testFilter();
+    testSpecialMoves();
+    testRgb();
+    testAscii();
+    testWrap();
+    testTimeline();
+    testSceneRunner();
+    std::printf("%d checks, %d failures\n", g_checks, g_failures);
+    return g_failures == 0 ? 0 : 1;
+}

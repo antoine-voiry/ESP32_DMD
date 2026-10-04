@@ -24,8 +24,6 @@ MessageFilter* messageFilter = nullptr;
 // Define the static member variable
 
 MQTTHelper* mqttClient= nullptr; 
-// Add forward declaration for WebServer instance
-WebServer server(80);
 LocalWebServer* webServer = nullptr;
 
 void initLogging() {
@@ -140,8 +138,16 @@ void setup() {
     
     // Initialize other components
     dmdRenderer = new DMDRenderer(matrix);
+    dmdRenderer->setBrightnessPercent(ConfigHelper::getInstance().getBrightness());
     messageHandler = new MessageHandler(dmdRenderer);
     messageFilter = new MessageFilter();
+
+    // Port of RenderFirstStart(): tell the user where the web interface is.
+    TextRequest address;
+    address.text = std::string("http://") + WiFi.localIP().toString().c_str();
+    address.motion = dmd::Motion::Left;
+    dmdRenderer->renderText("Web ok via", 1000);
+    dmdRenderer->renderText(address);
 
     // Initialize web server
     webServer = new LocalWebServer();
@@ -167,7 +173,12 @@ void loop() {
     }
 
     // Handle MQTT messages
+    static int mqttWasConnected = -1;  // unknown until the first check
     if (mqttClient && mqttClient->handleConnect()) {
+        if (mqttWasConnected != 1) {
+            ESP_LOGI(TAG, "MQTT client connected");
+            mqttWasConnected = 1;
+        }
         mqttClient->loop();
         std::vector<std::string> messages = mqttClient->unStackMessages();
         for (const auto& message : messages) {
@@ -177,13 +188,15 @@ void loop() {
                 ESP_LOGW(TAG, "Invalid message: %s", message.c_str());
             }
         }
-    }else {
+    } else if (mqttWasConnected != 0) {
+        // Report the state change once instead of redrawing it on every loop.
         ESP_LOGE(TAG, "MQTT client not connected");
-        dmdRenderer->renderText("MQTT client not connected", false);
+        dmdRenderer->renderStatus("MQTT not connected");
+        mqttWasConnected = 0;
     }
-    dmdRenderer->update(); // Update the DMD renderer
-    // Small delay to prevent CPU hogging
-    delay(10);
+    dmdRenderer->update(); // Advance the current animation
+    // Yield to the idle task; animations need a fast loop (scroll frames are 10 ms apart).
+    delay(1);
 }
 
 void cleanup() {

@@ -1,4 +1,9 @@
 #include "MessageHandler.h"
+
+#include <esp_sleep.h>
+
+#include "ConfigHelper.h"
+#include "core/Protocol.h"
 #include "esp_log.h"
 
 static const char* TAG = "MessageHandler";
@@ -8,216 +13,205 @@ MessageHandler::MessageHandler(DMDRenderer* renderer) : dmdRenderer(renderer) {
     setupHandlers();
 }
 
+uint32_t MessageHandler::holdArg(const std::vector<std::string>& params, size_t i) {
+    if (i >= params.size()) {
+        return 0;
+    }
+    long seconds = dmd::parseIntArg(params[i], 0);
+    return seconds > 0 ? static_cast<uint32_t>(seconds) * 1000u : 0;
+}
+
+void MessageHandler::notPortedYet(const char* action, const char* phase) {
+    ESP_LOGW(TAG, "'%s' is not ported to the ESP32 yet (%s)", action, phase);
+}
 
 void MessageHandler::setupHandlers() {
-    // Initialize message handlers map
-    handlers["rebt"] = [this](const std::vector<std::string>& params) {
-        ESP_LOGW(TAG, "Reboot command received - not implemented for ESP32");
-        dmdRenderer->renderText("Reboot command received - not implemented for ESP32");
-        // TODO: Implement proper ESP32 restart
+    ////////////////////////////////////////////////////////////////////////////
+    // System
+    handlers["rebt"] = [this](const std::vector<std::string>&) {
+        ESP_LOGW(TAG, "Reboot requested");
+        dmdRenderer->clear();
+        delay(100);
+        ESP.restart();
     };
 
-    handlers["shutdwn"] = [this](const std::vector<std::string>& params) {
-        ESP_LOGW(TAG, "Shutdown command received - not implemented for ESP32");
-        // TODO: Implement proper ESP32 shutdown
-        dmdRenderer->renderText("Shutdown command received - not implemented for ESP32");
+    handlers["shutdwn"] = [this](const std::vector<std::string>&) {
+        // No power switch on the ESP32: blank the panel and sleep until the board is power cycled.
+        ESP_LOGW(TAG, "Shutdown requested: entering deep sleep (power cycle to restart)");
+        dmdRenderer->clear();
+        delay(100);
+        esp_deep_sleep_start();
     };
 
-    handlers["excludeFolder"] = [this](const std::vector<std::string>& params) {
-        if(params.size() < 2) {
-            ESP_LOGE(TAG, "Missing arguments for excludeFolder");
-            throw std::runtime_error("Missing arguments for excludeFolder");
-        }
-        ESP_LOGD(TAG, "Excluding folder: %s, %s", params[0].c_str(), params[1].c_str());
-        dmdRenderer->exclude(true, params[0], params[1]);
-    };
+    handlers["conf"] = [this](const std::vector<std::string>& params) { applyConf(params); };
 
-    handlers["excludeFile"] = [this](const std::vector<std::string>& params) {
-        if(params.size() < 2) {
-            ESP_LOGE(TAG, "Missing arguments for excludeFile");
-            throw std::runtime_error("Missing arguments for excludeFile");
-        }
-        if(dmdRenderer == nullptr) {
-            ESP_LOGE(TAG, "DMDRenderer not initialized");
-            throw std::runtime_error("DMDRenderer not initialized");
-        }
-        ESP_LOGD(TAG, "Excluding file: %s, %s", params[0].c_str(), params[1].c_str());
-        dmdRenderer->exclude(false, params[0], params[1]);
-    };
-
+    ////////////////////////////////////////////////////////////////////////////
+    // Text
     handlers["msg"] = [this](const std::vector<std::string>& params) {
-        if(params.empty()) {
-            ESP_LOGE(TAG, "Missing arguments for msg");
-            throw std::runtime_error("Missing arguments for msg");
-        }
-        std::string text = params[0].empty() ? "-Vide-" : params[0];
-        ESP_LOGI(TAG, "Rendering message: %s", text.c_str());
-        dmdRenderer->renderText(text);
-        if(params.size() > 1) {
-            ESP_LOGE(TAG, "Delaying for %s seconds", params[1].c_str());
-            delay(std::stoi(params[1]) * 1000);
-        }
+        const std::string text = params[0].empty() ? "-Vide-" : params[0];
+        dmdRenderer->renderText(text, params.size() == 2 ? holdArg(params, 1) : 0);
     };
 
     handlers["score"] = [this](const std::vector<std::string>& params) {
-        if(params.empty()) {
-            ESP_LOGE(TAG, "Missing arguments for score");
-            throw std::runtime_error("Missing arguments for score");
-        }
-        ESP_LOGI(TAG, "Rendering score: %s", params[0].c_str());
-        dmdRenderer->renderText(params[0], true);
-        if(params.size() > 1) {
-            ESP_LOGE(TAG, "Delaying for %s seconds", params[1].c_str());
-            delay(std::stoi(params[1]) * 1000);
-        }
-    };
-    handlers["owmzc"] = [this](const std::vector<std::string>& params) { 
-        ESP_LOGI(TAG, "OWMZC command received"); 
-        // TODO: Implement Open Weather Map Zone Coverage
+        dmdRenderer->renderScore(params[0], params.size() == 2 ? holdArg(params, 1) : 0);
     };
 
-    handlers["fllcn"] = [this](const std::vector<std::string>& params) {
-        ESP_LOGI(TAG, "FLLCN command received");
-        // TODO: Implement Fall/Winter seasonal change
-    };
-
-    handlers["meteo"] = [this](const std::vector<std::string>& params) {
-        ESP_LOGI(TAG, "Meteo command received");
-        // TODO: Implement weather display
-    };
-    handlers["meteoPrevi"] = [this](const std::vector<std::string>& params) {
-        ESP_LOGI(TAG, "Meteo forecast command received");
-        // TODO: Implement weather forecast display
-    };
-    handlers["receipconf"] = [this](const std::vector<std::string>& params) {
-        ESP_LOGI(TAG, "Receipt configuration command received");
-        // TODO: Implement configuration receipt handling
-    };
-    handlers["rldconf"] = [this](const std::vector<std::string>& params) {
-        ESP_LOGI(TAG, "Reload configuration command received");
-        // TODO: Implement configuration reload
-    };
-    handlers["conf"] = [this](const std::vector<std::string>& params) {
-        ESP_LOGI(TAG, "Configuration command received");
-        // TODO: Implement configuration handling
-    };
-    handlers["waiter"] = [this](const std::vector<std::string>& params) {
-        ESP_LOGI(TAG, "Waiter command received");
-        // TODO: Implement waiter mode
-    };
+    // msgmove|text|left|2
     handlers["msgmove"] = [this](const std::vector<std::string>& params) {
-        ESP_LOGI(TAG, "Message move command received");
-        // TODO: Implement moving message display
-    };
-    handlers["msgmovebcl"] = [this](const std::vector<std::string>& params) {
-        ESP_LOGI(TAG, "Message move loop command received");
-        // TODO: Implement looping message display
-    };
-    handlers["msgcarrou"] = [this](const std::vector<std::string>& params) {
-        ESP_LOGI(TAG, "Message carousel command received");
-        // TODO: Implement carousel message display
-    };
-    handlers["msgcolor"] = [this](const std::vector<std::string>& params) {
-        ESP_LOGI(TAG, "Message color command received");
-        // TODO: Implement colored message display
-    };
-    handlers["msgimg"] = [this](const std::vector<std::string>& params) {
-        ESP_LOGI(TAG, "Message with image command received");
-        // TODO: Implement message with image display
-    };
-    handlers["testFont"] = [this](const std::vector<std::string>& params) {
-        ESP_LOGI(TAG, "Test font command received");
-        // TODO: Implement font testing
-    };
-    handlers["testPattern"] = [this](const std::vector<std::string>& params) {
-        ESP_LOGI(TAG, "Test pattern command received");
-        // TODO: Implement pattern testing
-    };
-    handlers["rand"] = [this](const std::vector<std::string>& params) {
-        ESP_LOGI(TAG, "Random command received");
-        // TODO: Implement random content display
-    };
-    handlers["demo"] = [this](const std::vector<std::string>& params) {
-        ESP_LOGI(TAG, "Demo command received");
-        // TODO: Implement demo mode
-    };
-    handlers["gif"] = [this](const std::vector<std::string>& params) {
-        ESP_LOGI(TAG, "GIF command received");
-        // TODO: Implement GIF display
-    };
-    handlers["gifText"] = [this](const std::vector<std::string>& params) {
-        ESP_LOGI(TAG, "GIF with text command received");
-        // TODO: Implement GIF with text display
-    };
-    handlers["gifPath"] = [this](const std::vector<std::string>& params) {
-        ESP_LOGI(TAG, "GIF path command received");
-        // TODO: Implement GIF path handling
-    };
-    handlers["img"] = [this](const std::vector<std::string>& params) {
-        ESP_LOGI(TAG, "Image command received");
-        // TODO: Implement image display
-    };
-    handlers["time"] = [this](const std::vector<std::string>& params) {
-        ESP_LOGI(TAG, "Time command received");
-        // TODO: Implement time display
-    };
-    handlers["sound"] = [this](const std::vector<std::string>& params) {
-        ESP_LOGI(TAG, "Sound command received");
-        // TODO: Implement sound playback
-    };
-    handlers["effet"] = [this](const std::vector<std::string>& params) {
-        ESP_LOGI(TAG, "Effect command received");
-        // TODO: Implement visual effects
-    };
-    handlers["soundeffet"] = [this](const std::vector<std::string>& params) {
-        ESP_LOGI(TAG, "Sound effect command received");
-        // TODO: Implement sound effects
-    };
-    handlers["perf"] = [this](const std::vector<std::string>& params) {
-        ESP_LOGI(TAG, "Performance test command received");
-        // TODO: Implement performance testing
-    };
-    handlers["edfJoursTempo"] = [this](const std::vector<std::string>& params) {
-        ESP_LOGI(TAG, "EDF Tempo Days command received");
-        // TODO: Implement EDF Tempo Days display
+        TextRequest request;
+        request.text = params[0];
+        request.motion = dmd::parseMotion(params[1]);
+        dmdRenderer->renderText(request, params.size() == 3 ? holdArg(params, 2) : 0);
     };
 
+    // msgmovebcl|text|left|iterations|2
+    // (the original sleeps for "iterations" seconds here, an evident typo for the 4th argument)
+    handlers["msgmovebcl"] = [this](const std::vector<std::string>& params) {
+        TextRequest request;
+        request.text = params[0];
+        request.motion = dmd::parseMotion(params[1]);
+        request.iterations = static_cast<int>(dmd::parseIntArg(params[2], 1));
+        dmdRenderer->renderText(request, params.size() == 4 ? holdArg(params, 3) : 0);
+    };
+
+    // msgcolor|text|255;255;255|0;0;0
+    handlers["msgcolor"] = [this](const std::vector<std::string>& params) {
+        TextRequest request;
+        request.text = params[0];
+        request.hasFg = dmd::parseRgb(params[1], request.fg);
+        request.hasBg = dmd::parseRgb(params[2], request.bg);
+        if (!request.hasFg || !request.hasBg) {
+            ESP_LOGW(TAG, "msgcolor: bad colour '%s' / '%s', using defaults", params[1].c_str(),
+                     params[2].c_str());
+        }
+        dmdRenderer->renderText(request);
+    };
+
+    // msgimg|text|/Medias/Patterns/2.png
+    handlers["msgimg"] = [this](const std::vector<std::string>& params) {
+        notPortedYet("msgimg background image", "phase 3, media");
+        dmdRenderer->renderText(params[0]);
+    };
+
+    // testFont|Font.ttf: the ESP32 has no TrueType fonts, show the sample with the built-in fonts.
+    handlers["testFont"] = [this](const std::vector<std::string>& params) {
+        ESP_LOGI(TAG, "testFont '%s': TrueType fonts are not available, using built-in fonts",
+                 params[0].c_str());
+        dmdRenderer->renderText("Test de la font");
+    };
+
+    // soundeffet|text|gif|sound: no audio on the ESP32; show the text part for now.
+    handlers["soundeffet"] = [this](const std::vector<std::string>& params) {
+        if (!params[0].empty()) {
+            dmdRenderer->renderText(params[0]);
+        } else {
+            notPortedYet("soundeffet without text", "phase 3, media");
+        }
+    };
+
+    handlers["sound"] = [](const std::vector<std::string>&) {
+        ESP_LOGW(TAG, "'sound' ignored: the ESP32 build has no audio output");
+    };
+
+    ////////////////////////////////////////////////////////////////////////////
+    // Not ported yet
+    const struct {
+        const char* action;
+        const char* phase;
+    } pending[] = {
+        {"waiter", "phase 2, attract mode"},
+        {"msgcarrou", "phase 2, carousel"},
+        {"time", "phase 2, clock"},
+        {"testPattern", "phase 2, clock"},
+        {"rldconf", "phase 5, settings"},
+        {"receipconf", "phase 5, settings"},
+        {"excludeFolder", "phase 3, media"},
+        {"excludeFile", "phase 3, media"},
+        {"rand", "phase 3, media"},
+        {"demo", "phase 3, media"},
+        {"gif", "phase 3, media"},
+        {"gifText", "phase 3, media"},
+        {"gifPath", "phase 3, media"},
+        {"img", "phase 3, media"},
+        {"effet", "phase 3, media"},
+        {"owmzc", "phase 4, weather"},
+        {"fllcn", "phase 4, weather"},
+        {"meteo", "phase 4, weather"},
+        {"meteoPrevi", "phase 4, weather"},
+        {"edfJoursTempo", "phase 4, EDF Tempo"},
+        {"perf", "phase 4, performance view"},
+    };
+    for (const auto& p : pending) {
+        const char* action = p.action;
+        const char* phase = p.phase;
+        handlers[action] = [this, action, phase](const std::vector<std::string>&) {
+            notPortedYet(action, phase);
+        };
+    }
+}
+
+// conf|Section|key:value|key:value  (DMDRenderer_Config.ApplyConfig)
+void MessageHandler::applyConf(const std::vector<std::string>& params) {
+    const std::string& section = params[0];
+    ConfigHelper& config = ConfigHelper::getInstance();
+    bool changed = false;
+    for (size_t i = 1; i < params.size(); ++i) {
+        const std::string& kv = params[i];
+        size_t colon = kv.find(':');
+        if (colon == std::string::npos) {
+            ESP_LOGW(TAG, "conf: ignoring '%s' (expected key:value)", kv.c_str());
+            continue;
+        }
+        const std::string key = kv.substr(0, colon);
+        const std::string value = kv.substr(colon + 1);
+        if (section == "DMDRenderer" && key == "brightness") {
+            long pct = dmd::parseIntArg(value, -1);
+            if (pct < 0 || pct > 100) {
+                ESP_LOGW(TAG, "conf: invalid brightness '%s'", value.c_str());
+                continue;
+            }
+            config.setBrightness(static_cast<int>(pct));
+            dmdRenderer->setBrightnessPercent(static_cast<int>(pct));
+            changed = true;
+            ESP_LOGI(TAG, "Brightness set to %ld %%", pct);
+        } else if (section == "DMDRenderer" && key == "brightnesshours") {
+            // Applied hour by hour once the clock is ported (phase 2); stored now.
+            config.setBrightnessHours(value);
+            changed = true;
+        } else {
+            ESP_LOGW(TAG, "conf: [%s] %s is not supported on the ESP32 yet (phase 5, settings)",
+                     section.c_str(), key.c_str());
+        }
+    }
+    if (changed) {
+        config.saveConfigFile();
+    }
 }
 
 void MessageHandler::handleMessage(const std::string& message) {
     ESP_LOGD(TAG, "Handling message: %s", message.c_str());
 
-    auto parts = parseMessage(message);
-    if(parts.empty()) {
-        ESP_LOGW(TAG, "Received empty message");
+    dmd::Command command;
+    if (!dmd::parseCommand(message, command)) {
+        ESP_LOGW(TAG, "Malformed message: %s", message.c_str());
         return;
     }
 
-    std::string action = parts[0];
-    parts.erase(parts.begin());
-    
-    try {
-        auto handler = handlers.find(action);
-        if(handler != handlers.end()) {
-            ESP_LOGD(TAG, "Executing handler for action: %s", action.c_str());
-            handler->second(parts);
-        } else {
-            ESP_LOGW(TAG, "Unknown action received: %s", action.c_str());
-        }
-    } catch(const std::exception& e) {
-        ESP_LOGE(TAG, "Error handling message: %s", e.what());
-    }
-}
+    // Like the original: every accepted message stops the current animation first,
+    // even if its own arguments turn out to be missing.
+    dmdRenderer->interrupt();
 
-std::vector<std::string> MessageHandler::parseMessage(const std::string& message) {
-    ESP_LOGD(TAG, "Parsing message: %s", message.c_str());
-    std::vector<std::string> parts;
-    std::stringstream ss(message);
-    std::string item;
-
-    while(std::getline(ss, item, '|')) {
-        parts.push_back(item);
+    if (command.args.size() < dmd::minArgs(command.action)) {
+        ESP_LOGE(TAG, "Missing arguments for '%s': got %u, expected %u", command.action.c_str(),
+                 static_cast<unsigned>(command.args.size()),
+                 static_cast<unsigned>(dmd::minArgs(command.action)));
+        return;
     }
 
-    return parts;
+    auto handler = handlers.find(command.action);
+    if (handler == handlers.end()) {
+        ESP_LOGW(TAG, "Unknown action received: %s", command.action.c_str());
+        return;
+    }
+    handler->second(command.args);
 }

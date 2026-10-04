@@ -32,6 +32,8 @@ class ConfigHelper
     std::string  _mqtt_url;
     std::string  _mqtt_path;
     std::string  _hostname;
+    int _brightness = 90;                 // [DMDRenderer] brightness, percent
+    std::string _brightnessHours;         // [DMDRenderer] brightnesshours, 24 comma-separated percents
     boolean _configLoaded = false; // Flag to check if config was saved
 
     static ConfigHelper* _instance; // Static instance pointer
@@ -56,6 +58,12 @@ class ConfigHelper
     const std::string getHostname() const;
     void setHostname(std::string hostname);
 
+    // [DMDRenderer] brightness (0..100 %) and brightnesshours (24 comma-separated percents)
+    int getBrightness() const { return _brightness; }
+    void setBrightness(int brightness) { _brightness = brightness; }
+    const std::string& getBrightnessHours() const { return _brightnessHours; }
+    void setBrightnessHours(const std::string& hours) { _brightnessHours = hours; }
+
     boolean isConfigLoaded() const {
         return _configLoaded;
     }
@@ -63,4 +71,4 @@ class ConfigHelper
 
 
 };
-#endif
+#endif
