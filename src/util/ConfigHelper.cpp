@@ -29,6 +29,10 @@ void ConfigHelper::saveConfigFile() {
     json["hostname"] = _hostname;
     json["brightness"] = _brightness;
     json["brightnesshours"] = _brightnessHours;
+    JsonObject settings = json["settings"].to<JsonObject>();
+    for (const auto& kv : _settings) {
+        settings[kv.first] = kv.second;
+    }
      
     File configFile = SPIFFS.open(JSON_CONFIG_FILE, "w");
     if (!configFile) {
@@ -97,6 +101,13 @@ bool ConfigHelper::loadConfigFile() {
                             // Optional keys, absent from config files written by older firmware.
                             _brightness = json["brightness"] | 90;
                             _brightnessHours = std::string(json["brightnesshours"] | "");
+                            _settings.clear();
+                            JsonObject settings = json["settings"].as<JsonObject>();
+                            if (!settings.isNull()) {
+                                for (JsonPair kv : settings) {
+                                    _settings[kv.key().c_str()] = std::string(kv.value() | "");
+                                }
+                            }
 
                             ESP_LOGD(TAG, "MQTT Path in variable: %s, URL: %s, Hostname: %s", 
                                 _mqtt_path.c_str(), _mqtt_url.c_str(), _hostname.c_str());
@@ -157,6 +168,26 @@ void ConfigHelper::setHostname(const std::string hostname) {
     _hostname = std::move(hostname);
 }
 
+
+std::string ConfigHelper::getSetting(const std::string& section, const std::string& key,
+                                     const std::string& fallback) const {
+    auto it = _settings.find(section + "." + key);
+    return it == _settings.end() || it->second.empty() ? fallback : it->second;
+}
+
+long ConfigHelper::getSettingInt(const std::string& section, const std::string& key, long fallback) const {
+    const std::string value = getSetting(section, key, "");
+    if (value.empty()) {
+        return fallback;
+    }
+    char* end = nullptr;
+    long parsed = strtol(value.c_str(), &end, 10);
+    return (end == value.c_str() || *end != '\0') ? fallback : parsed;
+}
+
+void ConfigHelper::setSetting(const std::string& section, const std::string& key, const std::string& value) {
+    _settings[section + "." + key] = value;
+}
 
 // Default constructor definition
 ConfigHelper::ConfigHelper() {

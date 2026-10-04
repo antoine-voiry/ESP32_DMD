@@ -9,6 +9,9 @@
 #include "util/MessageHandler.h"
 #include "util/MessageFilter.h"
 #include "util/LocalWebServer.h"
+#include "util/AttractController.h"
+#include "util/Settings.h"
+#include "util/TimeService.h"
 #include "matrix/Hub75_Matrix.h"
 static const char* TAG = "Main";  // Add this line for ESP_LOG tag
 static unsigned long lastLog = 0;  // Move outside loop() to preserve value
@@ -24,6 +27,8 @@ MessageFilter* messageFilter = nullptr;
 // Define the static member variable
 
 MQTTHelper* mqttClient= nullptr; 
+TimeService timeService;
+AttractController* attract = nullptr;
 LocalWebServer* webServer = nullptr;
 
 void initLogging() {
@@ -139,7 +144,11 @@ void setup() {
     // Initialize other components
     dmdRenderer = new DMDRenderer(matrix);
     dmdRenderer->setBrightnessPercent(ConfigHelper::getInstance().getBrightness());
-    messageHandler = new MessageHandler(dmdRenderer);
+    dmdRenderer->defaultStyle() = settings::textStyle();
+    timeService.begin(settings::timezone());
+    attract = new AttractController(dmdRenderer);
+    attract->onMessage(millis());  // arms the Running.attract_mode countdown, as RenderFirstStart() did
+    messageHandler = new MessageHandler(dmdRenderer, attract, &timeService);
     messageFilter = new MessageFilter();
 
     // Port of RenderFirstStart(): tell the user where the web interface is.
@@ -183,6 +192,7 @@ void loop() {
         std::vector<std::string> messages = mqttClient->unStackMessages();
         for (const auto& message : messages) {
             if (messageFilter && messageFilter->isValidMessage(message)) {
+                attract->onMessage(millis());
                 messageHandler->handleMessage(message);
             } else {
                 ESP_LOGW(TAG, "Invalid message: %s", message.c_str());
@@ -194,6 +204,8 @@ void loop() {
         dmdRenderer->renderStatus("MQTT not connected");
         mqttWasConnected = 0;
     }
+    attract->loop(millis());
+    timeService.loop(millis(), *dmdRenderer);
     dmdRenderer->update(); // Advance the current animation
     // Yield to the idle task; animations need a fast loop (scroll frames are 10 ms apart).
     delay(1);

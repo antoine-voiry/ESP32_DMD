@@ -65,6 +65,10 @@ String LocalWebServer::generateConfigForm(const String& jsonString) {
     deserializeJson(doc, jsonString);
 
     for (JsonPair pair : doc.as<JsonObject>()) {
+        // Nested objects (the Raspy2DMD "settings" set over MQTT) are not editable here.
+        if (pair.value().is<JsonObject>() || pair.value().is<JsonArray>()) {
+            continue;
+        }
         html += "<label>" + String(pair.key().c_str()) + ":</label>";
         html += "<input type='text' name='" + String(pair.key().c_str()) + 
                 "' value='" + pair.value().as<String>() + "'><br><br>";
@@ -115,7 +119,15 @@ void LocalWebServer::handleSaveConfig() {
         return;
     }
 
+    // Merge into the existing file so keys missing from the form (e.g. "settings") survive.
     DynamicJsonDocument doc(JSON_CAPACITY);
+    File existing = SPIFFS.open(CONFIG_FILE, "r");
+    if (existing) {
+        if (deserializeJson(doc, existing)) {
+            doc.clear();
+        }
+        existing.close();
+    }
     for (uint8_t i = 0; i < server.args(); i++) {
         doc[server.argName(i)] = server.arg(i);
         ESP_LOGD(TAG, "POST param '%s' = '%s'", 
