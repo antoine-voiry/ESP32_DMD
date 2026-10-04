@@ -10,6 +10,78 @@
 #include "core/TextUtil.h"
 static const char* TAG = "LocalWebServer";
 
+namespace {
+
+const char kStyle[] PROGMEM =
+    ":root{--bg:#0d0e12;--card:#161821;--line:#252838;--fg:#e8eaf0;--mut:#8b91a5;--acc:#ff5a36;--acc2:#3db1ff}"
+    "*{box-sizing:border-box}body{margin:0;font:15px/1.5 system-ui,-apple-system,sans-serif;background:var(--bg);"
+    "color:var(--fg)}a{color:var(--acc2)}header{display:flex;flex-wrap:wrap;gap:6px 20px;align-items:center;"
+    "padding:12px 20px;background:#090a0d;border-bottom:1px solid var(--line)}header .logo{font-weight:700;"
+    "letter-spacing:.5px}header .logo span{color:var(--acc)}nav a{color:var(--mut);text-decoration:none;"
+    "margin-right:16px}nav a.on,nav a:hover{color:var(--fg)}main{max-width:900px;margin:auto;padding:20px 16px}"
+    "h1{font-size:22px;margin:4px 0 16px}h2{font-size:16px;margin:0 0 10px;color:var(--mut);font-weight:600}"
+    ".card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px 18px;"
+    "margin-bottom:16px}input,select{background:var(--bg);color:var(--fg);border:1px solid var(--line);"
+    "border-radius:8px;padding:7px 9px;font:inherit;max-width:100%}button,input[type=submit]{background:var(--acc);"
+    "color:#fff;border:0;border-radius:8px;padding:8px 14px;font:inherit;cursor:pointer}"
+    "input::file-selector-button{background:#252a3d;color:var(--fg);border:0;border-radius:6px;"
+    "padding:4px 10px;margin-right:8px;font:inherit;cursor:pointer}button.chip{background:#252a3d;color:var(--fg);margin:3px 4px 3px 0;padding:6px 11px}"
+    "button.chip:hover{background:#30364f}button.del{background:transparent;color:var(--mut);padding:2px 6px}"
+    "button.del:hover{color:var(--acc)}.kv div{display:flex;justify-content:space-between;gap:12px;"
+    "border-bottom:1px solid var(--line);padding:5px 0}.kv span{color:var(--mut)}table{width:100%;"
+    "border-collapse:collapse}td{padding:6px 4px;border-bottom:1px solid var(--line);word-break:break-all}"
+    "td.n{text-align:right;color:var(--mut);white-space:nowrap}.muted{color:var(--mut)}.row{display:flex;"
+    "gap:8px;flex-wrap:wrap;align-items:center}.row input[type=text]{flex:1;min-width:200px}"
+    "fieldset{border:1px solid var(--line);border-radius:10px;margin:0 0 14px;padding:10px 14px}"
+    "legend{color:var(--acc);padding:0 6px}.f{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;"
+    "padding:3px 0}"
+    ".f label{flex:0 0 15em}.f input{flex:1;min-width:180px}.off label{color:var(--mut)}"
+    ".bar{height:8px;background:var(--bg);border-radius:4px;overflow:hidden}.bar i{display:block;height:100%;"
+    "background:linear-gradient(90deg,var(--acc2),var(--acc))}pre{white-space:pre-wrap;color:var(--mut)}";
+
+// One-click examples for the home page.
+const char* const kPresets[][2] = {
+    {"msg|Bienvenue|3", "Message"},
+    {"msgmove|Bienvenue au club|left", "Scrolling text"},
+    {"msgfx|DMD|rainbow|4", "Rainbow text"},
+    {"score|T20 - T20 - T20", "180!"},
+    {"fx|fireworks|6", "Fireworks"},
+    {"fx|plasma|6", "Plasma"},
+    {"fx|matrix|6", "Matrix"},
+    {"time|start", "Clock"},
+    {"meteo|", "Weather"},
+    {"edfJoursTempo|", "EDF Tempo"},
+    {"perf|", "Board status"},
+    {"waiter|start", "Attract mode"},
+    {"waiter|stop", "Stop attract"},
+};
+
+}  // namespace
+
+String LocalWebServer::page(const char* title, const char* active, const String& body) const {
+    static const char* const kNav[][2] = {
+        {"/", "Home"}, {"/settings", "Settings"}, {"/files", "Media"}, {"/config", "Wi-Fi &amp; MQTT"}};
+    String html;
+    html.reserve(body.length() + 3600);
+    html += F("<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'>"
+              "<meta name='viewport' content='width=device-width,initial-scale=1'><title>");
+    html += title;
+    html += F(" · ESP32 DMD</title><style>");
+    html += FPSTR(kStyle);
+    html += F("</style></head><body><header><div class='logo'>ESP32 <span>DMD</span></div><nav>");
+    for (const auto& item : kNav) {
+        html += "<a href='";
+        html += item[0];
+        html += strcmp(item[0], active) == 0 ? "' class='on'>" : "'>";
+        html += item[1];
+        html += "</a>";
+    }
+    html += F("</nav></header><main>");
+    html += body;
+    html += F("</main></body></html>");
+    return html;
+}
+
 LocalWebServer::LocalWebServer() : server(SERVER_PORT), tokenTimestamp(0), requestIndex(0) {
     // 0 = free slot (the array used to start uninitialised, rate limiting at random).
     for (auto& t : requestCounts) {
@@ -31,6 +103,7 @@ LocalWebServer::LocalWebServer() : server(SERVER_PORT), tokenTimestamp(0), reque
     server.on("/delete", HTTP_POST, std::bind(&LocalWebServer::handleDelete, this));
     server.on("/settings", HTTP_GET, std::bind(&LocalWebServer::handleSettings, this));
     server.on("/settings", HTTP_POST, std::bind(&LocalWebServer::handleSaveSettings, this));
+    server.on("/send", HTTP_POST, std::bind(&LocalWebServer::handleSend, this));
     server.onNotFound(std::bind(&LocalWebServer::handleNotFound, this));
 
 }
@@ -49,14 +122,49 @@ bool LocalWebServer::isRunning() const {
 }
 
 void LocalWebServer::handleRoot() {
-    String html = F("<!DOCTYPE html><html><head><title>Configuration</title></head><body>"
-                   "<h1>DMD Device Configuration</h1>"
-                   "<p><a href='/config'>View/Edit Configuration</a></p>"
-                   "<p><a href='/settings'>Raspy2DMD settings</a></p>"
-                   "<p><a href='/files'>Media files (GIFs, images, carousel texts, effects)</a></p>"
-                   "</body></html>");
-    server.send(200, "text/html", html);
-    ESP_LOGD(TAG, "Root page served");
+    String body = F("<h1>Panel</h1>");
+    if (server.hasArg("sent")) {
+        body += server.arg("sent") == "1" ? F("<div class='card'>Sent to the panel.</div>")
+                                         : F("<div class='card'>Rejected: unknown command, bad score, or "
+                                             "not allowed in standalone mode.</div>");
+    }
+    body += F("<div class='card'><h2>Send to the panel</h2>"
+              "<form method='post' action='/send'><div class='row'>"
+              "<input type='text' name='cmd' placeholder='msg|Hello|3' autofocus>"
+              "<input type='submit' value='Send'></div></form><div style='margin-top:10px'>"
+              "<form method='post' action='/send'>");
+    for (const auto& preset : kPresets) {
+        body += "<button class='chip' name='cmd' value='";
+        body += dmd::htmlEscape(preset[0]).c_str();
+        body += "'>";
+        body += preset[1];
+        body += "</button>";
+    }
+    body += F("</form></div><p class='muted'>Same messages as Raspydarts sends over MQTT; see "
+              "docs/PORTING.md for the full list.</p></div>");
+    if (statusProvider) {
+        body += F("<div class='card'><h2>Status</h2><div class='kv'>");
+        for (const auto& kv : statusProvider()) {
+            body += "<div><span>";
+            body += dmd::htmlEscape(kv.first).c_str();
+            body += "</span><b>";
+            body += dmd::htmlEscape(kv.second).c_str();
+            body += "</b></div>";
+        }
+        body += F("</div></div>");
+    }
+    server.send(200, "text/html", page("Panel", "/", body));
+}
+
+void LocalWebServer::handleSend() {
+    if (!checkRateLimit()) {
+        server.send(429, "text/plain", "Too many requests");
+        return;
+    }
+    const std::string cmd = server.arg("cmd").c_str();
+    const bool ok = !cmd.empty() && onCommand && onCommand(cmd);
+    server.sendHeader("Location", ok ? "/?sent=1" : "/?sent=0");
+    server.send(303);
 }
 
 void LocalWebServer::handleConfig() {
@@ -65,16 +173,14 @@ void LocalWebServer::handleConfig() {
         return;
     }
     
-    String html = generateConfigForm(jsonString);
-    server.send(200, "text/html", html);
+    server.send(200, "text/html", page("Wi-Fi & MQTT", "/config", generateConfigForm(jsonString)));
     ESP_LOGD(TAG, "Config page served");
 }
 
 String LocalWebServer::generateConfigForm(const String& jsonString) {
-    String html = F("<!DOCTYPE html><html><head><title>Configuration</title></head><body>"
-                   "<h1>Current Configuration</h1>");
-    html += "<pre>" + jsonString + "</pre><hr><h2>Edit Configuration</h2>";
-    html += F("<form action='/save_config' method='post'>");
+    // Values can come from MQTT (conf): escape everything that goes into the page.
+    String html = F("<h1>Wi-Fi &amp; MQTT</h1><div class='card'><h2>Connection</h2>"
+                    "<form action='/save_config' method='post'>");
 
     DynamicJsonDocument doc(JSON_CAPACITY);
     deserializeJson(doc, jsonString);
@@ -84,12 +190,20 @@ String LocalWebServer::generateConfigForm(const String& jsonString) {
         if (pair.value().is<JsonObject>() || pair.value().is<JsonArray>()) {
             continue;
         }
-        html += "<label>" + String(pair.key().c_str()) + ":</label>";
-        html += "<input type='text' name='" + String(pair.key().c_str()) + 
-                "' value='" + pair.value().as<String>() + "'><br><br>";
+        const std::string key = dmd::htmlEscape(pair.key().c_str());
+        const std::string value = dmd::htmlEscape(pair.value().as<String>().c_str());
+        html += "<div class='f'><label>";
+        html += key.c_str();
+        html += "</label><input type='text' name='";
+        html += key.c_str();
+        html += "' value='";
+        html += value.c_str();
+        html += "'></div>";
     }
 
-    html += F("<input type='submit' value='Save Configuration'></form></body></html>");
+    html += F("<p><input type='submit' value='Save'></p></form></div><div class='card'><h2>config.json</h2><pre>");
+    html += dmd::htmlEscape(jsonString.c_str()).c_str();
+    html += F("</pre></div>");
     return html;
 }
 
@@ -217,38 +331,41 @@ bool LocalWebServer::checkRateLimit() {
 // Media file manager
 
 void LocalWebServer::handleFiles() {
-    String html = F("<!DOCTYPE html><html><head><meta charset='utf-8'><title>Media files</title>"
-                    "<style>body{font-family:sans-serif}td{padding:2px 8px}</style></head><body>"
-                    "<h1>Media files</h1>"
-                    "<p>Folders: /gifs, /images, /scores/&lt;dart&gt;, /specialsmoves/&lt;MOVE&gt;, /patterns, "
-                    "/textes; files /effets.txt and /exclusions.txt at the root.</p>"
-                    "<form id='up' method='post' enctype='multipart/form-data'>"
-                    "Folder <input id='dir' value='/gifs' size='24'> "
-                    "<input type='file' name='file' multiple> <input type='submit' value='Upload'></form>"
+    const unsigned usedKb = static_cast<unsigned>(LittleFS.usedBytes() / 1024);
+    const unsigned totalKb = static_cast<unsigned>(LittleFS.totalBytes() / 1024);
+    char line[160];
+    String html = F("<h1>Media</h1><div class='card'><h2>Upload</h2>"
+                    "<form id='up' method='post' enctype='multipart/form-data'><div class='row'>"
+                    "<input id='dir' list='dirs' value='/gifs' size='22'><datalist id='dirs'>"
+                    "<option value='/gifs'><option value='/images'><option value='/scores/T20'>"
+                    "<option value='/specialsmoves/MAXIMUM_TON_80'><option value='/patterns'><option value='/textes'>"
+                    "<option value='/meteo'><option value='/edfjourstempo'><option value='/'></datalist>"
+                    "<input type='file' name='file' multiple><input type='submit' value='Upload'></div></form>"
                     "<script>document.getElementById('up').onsubmit=function(){"
                     "this.action='/upload?dir='+encodeURIComponent(document.getElementById('dir').value);};"
-                    "</script><table>");
-    char line[64];
+                    "</script><p class='muted'>GIFs and PNGs are shrunk to fit the panel; keep them panel-sized. "
+                    "Root files: effets.txt (id|name|text|gif|sound), exclusions.txt.</p>");
+    snprintf(line, sizeof(line), "<div class='bar'><i style='width:%u%%'></i></div><p class='muted'>%u / %u KB used</p>",
+             totalKb ? usedKb * 100 / totalKb : 0, usedKb, totalKb);
+    html += line;
+    html += F("</div><div class='card'><h2>Files</h2><table>");
     for (const std::string& path : storageListFiles("/", true)) {
         File f = storage().open(path.c_str(), "r");
         const unsigned size = f ? static_cast<unsigned>(f.size()) : 0;
         const std::string escaped = dmd::htmlEscape(path);
         html += "<tr><td>";
         html += escaped.c_str();
-        snprintf(line, sizeof(line), "</td><td>%u B</td><td>", size);
+        snprintf(line, sizeof(line), "</td><td class='n'>%u KB</td><td class='n'>", (size + 1023) / 1024);
         html += line;
         if (path != CONFIG_FILE) {
             html += "<form method='post' action='/delete'><input type='hidden' name='path' value='";
             html += escaped.c_str();
-            html += "'><input type='submit' value='Delete'></form>";
+            html += "'><button class='del' title='Delete'>&#10005;</button></form>";
         }
         html += "</td></tr>";
     }
-    snprintf(line, sizeof(line), "</table><p>%u / %u KB used</p>",
-             static_cast<unsigned>(LittleFS.usedBytes() / 1024), static_cast<unsigned>(LittleFS.totalBytes() / 1024));
-    html += line;
-    html += F("<p><a href='/'>Back</a></p></body></html>");
-    server.send(200, "text/html", html);
+    html += F("</table></div>");
+    server.send(200, "text/html", page("Media", "/files", html));
 }
 
 void LocalWebServer::handleUpload() {
@@ -315,13 +432,10 @@ void LocalWebServer::handleDelete() {
 
 void LocalWebServer::handleSettings() {
     const ConfigHelper& config = ConfigHelper::getInstance();
-    String html = F("<!DOCTYPE html><html><head><meta charset='utf-8'><title>Raspy2DMD settings</title>"
-                    "<style>body{font-family:sans-serif}label{display:inline-block;width:16em}"
-                    ".off{color:#888}fieldset{margin-bottom:1em}</style></head><body>"
-                    "<h1>Raspy2DMD settings</h1>"
-                    "<p>Same keys as Raspy2DMD.cfg (and conf|Section|key:value). Grey keys are kept for "
-                    "Raspydarts but have no effect on the ESP32. Panel size and standalone mode restart the board.</p>"
-                    "<form method='post' action='/settings'>");
+    String html = F("<h1>Settings</h1><p class='muted'>Same keys as Raspy2DMD.cfg and "
+                    "<code>conf|Section|key:value</code>. Grey keys are kept for Raspydarts but have no effect on "
+                    "the ESP32. Panel size and standalone mode restart the board.</p>"
+                    "<form method='post' action='/settings' class='card'>");
     const char* section = "";
     for (const dmd::SettingDef& def : dmd::configSchema()) {
         if (strcmp(section, def.section) != 0) {
@@ -333,16 +447,16 @@ void LocalWebServer::handleSettings() {
         }
         const std::string name = std::string(def.section) + "." + def.key;
         const std::string value = config.getSetting(def.section, def.key, def.def);
-        html += def.usedOnEsp32 ? "<label>" : "<label class='off'>";
+        html += def.usedOnEsp32 ? "<div class='f'><label>" : "<div class='f off'><label>";
         html += def.key;
-        html += "</label><input size='40' name='";
+        html += "</label><input name='";
         html += dmd::htmlEscape(name).c_str();
         html += "' value='";
         html += dmd::htmlEscape(value).c_str();
-        html += "'><br>";
+        html += "'></div>";
     }
-    html += F("</fieldset><input type='submit' value='Save'></form><p><a href='/'>Back</a></p></body></html>");
-    server.send(200, "text/html", html);
+    html += F("</fieldset><input type='submit' value='Save'></form>");
+    server.send(200, "text/html", page("Settings", "/settings", html));
 }
 
 void LocalWebServer::handleSaveSettings() {

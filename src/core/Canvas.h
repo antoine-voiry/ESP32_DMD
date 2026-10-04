@@ -33,6 +33,8 @@ struct Canvas {
     void drawLine(int x0, int y0, int x1, int y1, uint16_t c);
     // Copies src at (x, y), clipped; pixels equal to `transparent` are skipped when skipTransparent.
     void blit(const Canvas& src, int x, int y, bool skipTransparent = false, uint16_t transparent = 0);
+    // Scales every pixel's brightness by keep/255 (fading trails).
+    void fade(uint8_t keep);
     // Number of pixels of colour c (handy in tests).
     int count(uint16_t c) const;
 };

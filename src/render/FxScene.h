@@ -9,6 +9,8 @@
 #include <string>
 
 #include "core/Fx.h"
+#include "core/FxRender.h"
+#include "render/Bitmap.h"
 #include "core/SceneRunner.h"
 #include "core/TextUtil.h"
 #include "matrix/Hub75_Matrix.h"
@@ -36,16 +38,14 @@ public:
 
 private:
     void drawFrame(uint32_t elapsedMs, uint32_t dtMs);
-    void drawBackground(uint32_t elapsedMs, uint32_t dtMs);
     void drawText(uint32_t elapsedMs);
     bool textPixel(int x, int y) const;
 
     Hub75_Matrix& _matrix;
     FxSpec _spec;
     std::unique_ptr<GFXcanvas1> _image;
-    std::unique_ptr<dmd::Fireworks> _fireworks;
-    std::unique_ptr<dmd::Starfield> _stars;
-    std::unique_ptr<dmd::MatrixRain> _rain;
+    std::unique_ptr<dmd::FxBackgroundRenderer> _background;
+    std::unique_ptr<Bitmap565> _frame;
     dmd::Rng _rng;
     uint32_t _startMs = 0;
     uint32_t _lastFrameMs = 0;

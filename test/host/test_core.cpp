@@ -10,6 +10,7 @@
 #include "core/Clock.h"
 #include "core/ConfigSchema.h"
 #include "core/Fx.h"
+#include "core/FxRender.h"
 #include "core/Media.h"
 #include "core/Motion.h"
 #include "core/Online.h"
@@ -293,7 +294,11 @@ static void testFireworks() {
     Fireworks::Particle p{};
     p.maxLifeMs = 1000;
     p.lifeMs = 500;
-    CHECK_EQ(Fireworks::level(p), 127);
+    CHECK_EQ(Fireworks::level(p), 191);  // ease-out: still bright at half life
+    p.lifeMs = 0;
+    CHECK_EQ(Fireworks::level(p), 0);
+    p.lifeMs = 1000;
+    CHECK_EQ(Fireworks::level(p), 255);
 }
 
 static void testStarsAndRain() {
@@ -522,6 +527,12 @@ static void testCanvas() {
     CHECK_EQ(dst.count(4), 1);
     CHECK_EQ(dst.get(3, 3), 1);
     CHECK_EQ(dst.get(2, 3), 4);
+    Canvas fadeTest(2, 1);
+    fadeTest.set(0, 0, rgb565(255, 255, 255));
+    fadeTest.fade(128);
+    CHECK(fadeTest.get(0, 0) != 0 && fadeTest.get(0, 0) < rgb565(255, 255, 255));
+    for (int i = 0; i < 20; ++i) fadeTest.fade(128);
+    CHECK_EQ(fadeTest.get(0, 0), 0);
     CHECK_EQ(rgb565(255, 255, 255), 0xFFFF);
     CHECK_EQ(rgb565(255, 0, 0), 0xF800);
 }
@@ -703,6 +714,37 @@ static void testConfigSchema() {
     CHECK(g.cols == 64 && g.rows == 32);
 }
 
+static void testFxRender() {
+    const FxBackground kinds[] = {FxBackground::Plasma, FxBackground::Fireworks, FxBackground::Starfield,
+                                  FxBackground::MatrixRain};
+    for (FxBackground k : kinds) {
+        FxBackgroundRenderer r(k, 64, 32, 5);
+        Canvas c(64, 32);
+        int lit = 0;
+        for (uint32_t t = 0; t < 3000; t += 33) {
+            c.clear();
+            r.render(c, t, 33);
+            lit = std::max(lit, 64 * 32 - c.count(0));
+        }
+        CHECK(lit > 10);
+        // Dimmed rendering is never brighter than full brightness (plasma is deterministic).
+        if (k == FxBackground::Plasma) {
+            Canvas full(64, 32), dim(64, 32);
+            FxBackgroundRenderer(k, 64, 32, 5).render(full, 500, 33, 255);
+            FxBackgroundRenderer(k, 64, 32, 5).render(dim, 500, 33, 90);
+            int brighter = 0;
+            for (size_t i = 0; i < full.px.size(); ++i) {
+                if ((dim.px[i] >> 11) > (full.px[i] >> 11)) ++brighter;
+            }
+            CHECK_EQ(brighter, 0);
+        }
+    }
+    FxBackgroundRenderer none(FxBackground::None, 64, 32, 1);
+    Canvas c(64, 32);
+    none.render(c, 0, 33);
+    CHECK_EQ(c.count(0), 64 * 32);
+}
+
 int main() {
     testParseCommand();
     testFilter();
@@ -728,6 +770,7 @@ int main() {
     testOnlineFormatting();
     testOnlineDrawing();
     testConfigSchema();
+    testFxRender();
     std::printf("%d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }

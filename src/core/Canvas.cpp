@@ -67,6 +67,16 @@ void Canvas::blit(const Canvas& src, int x, int y, bool skipTransparent, uint16_
     }
 }
 
+void Canvas::fade(uint8_t keep) {
+    for (auto& p : px) {
+        if (!p) continue;
+        const uint16_t r = static_cast<uint16_t>(((p >> 11) & 0x1F) * keep / 255);
+        const uint16_t g = static_cast<uint16_t>(((p >> 5) & 0x3F) * keep / 255);
+        const uint16_t b = static_cast<uint16_t>((p & 0x1F) * keep / 255);
+        p = static_cast<uint16_t>((r << 11) | (g << 5) | b);
+    }
+}
+
 int Canvas::count(uint16_t c) const {
     int n = 0;
     for (auto p : px) n += p == c ? 1 : 0;

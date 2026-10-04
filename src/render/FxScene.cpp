@@ -37,19 +37,8 @@ void FxScene::start(uint32_t nowMs) {
             ESP_LOGE(TAG, "No text image, showing the background only");
         }
     }
-    switch (_spec.background) {
-        case dmd::FxBackground::Fireworks:
-            _fireworks.reset(new dmd::Fireworks(w, h, esp_random()));
-            break;
-        case dmd::FxBackground::Starfield:
-            _stars.reset(new dmd::Starfield(w, h, 40, esp_random()));
-            break;
-        case dmd::FxBackground::MatrixRain:
-            _rain.reset(new dmd::MatrixRain(w, h, esp_random()));
-            break;
-        default:
-            break;
-    }
+    _background.reset(new dmd::FxBackgroundRenderer(_spec.background, w, h, esp_random()));
+    _frame.reset(new Bitmap565(w, h));
     _startMs = nowMs;
     _lastFrameMs = nowMs;
     drawFrame(0, 0);
@@ -90,63 +79,6 @@ bool FxScene::textPixel(int x, int y) const {
     return _image->getPixel(x, y);
 }
 
-void FxScene::drawBackground(uint32_t elapsedMs, uint32_t dtMs) {
-    const int w = _matrix.width();
-    const int h = _matrix.height();
-    const uint8_t dim = _image ? kBackgroundDimText : 255;
-
-    switch (_spec.background) {
-        case dmd::FxBackground::Plasma: {
-            const uint8_t t = static_cast<uint8_t>(elapsedMs / 16);
-            for (int y = 0; y < h; ++y) {
-                for (int x = 0; x < w; ++x) {
-                    const uint8_t v = static_cast<uint8_t>(
-                        (dmd::sin8(static_cast<uint8_t>(x * 8 + t)) +
-                         dmd::sin8(static_cast<uint8_t>(y * 11 - t * 2)) +
-                         dmd::sin8(static_cast<uint8_t>((x + y) * 6 + t))) / 3);
-                    const dmd::Rgb c = dmd::hsv(static_cast<uint8_t>(v + t), 255, dim);
-                    _matrix.drawPixel(x, y, _matrix.color(c.r, c.g, c.b));
-                }
-            }
-            break;
-        }
-        case dmd::FxBackground::Fireworks: {
-            _fireworks->step(dtMs);
-            for (const auto& p : _fireworks->particles()) {
-                const uint8_t level = static_cast<uint8_t>(dmd::Fireworks::level(p) * dim / 255);
-                const dmd::Rgb c = p.rocket ? dmd::Rgb{level, level, level} : dmd::hsv(p.hue, 230, level);
-                _matrix.drawPixel(static_cast<int16_t>(p.x), static_cast<int16_t>(p.y),
-                                  _matrix.color(c.r, c.g, c.b));
-            }
-            break;
-        }
-        case dmd::FxBackground::Starfield: {
-            _stars->step(dtMs);
-            for (const auto& s : _stars->stars()) {
-                const uint8_t level = static_cast<uint8_t>((60 + s.speed * 65) * dim / 255);
-                _matrix.drawPixel(static_cast<int16_t>(s.x), s.y, _matrix.color(level, level, level));
-            }
-            break;
-        }
-        case dmd::FxBackground::MatrixRain: {
-            _rain->step(dtMs);
-            for (int y = 0; y < h; ++y) {
-                for (int x = 0; x < w; ++x) {
-                    const uint8_t level = _rain->level(x, y);
-                    if (level == 0) continue;
-                    const uint8_t g = static_cast<uint8_t>(level * dim / 255);
-                    // The head is nearly white, the trail green.
-                    const uint8_t rb = level > 240 ? static_cast<uint8_t>(180 * dim / 255) : 0;
-                    _matrix.drawPixel(x, y, _matrix.color(rb, g, rb));
-                }
-            }
-            break;
-        }
-        case dmd::FxBackground::None:
-        default:
-            break;
-    }
-}
 
 void FxScene::drawText(uint32_t elapsedMs) {
     if (!_image) {
@@ -198,8 +130,14 @@ void FxScene::drawText(uint32_t elapsedMs) {
 }
 
 void FxScene::drawFrame(uint32_t elapsedMs, uint32_t dtMs) {
-    _matrix.fillScreen(0);
-    drawBackground(elapsedMs, dtMs);
+    // Background into the frame buffer (shared with the host preview tool), then text on top.
+    _frame->clear();
+    _background->render(*_frame, elapsedMs, dtMs, _image ? kBackgroundDimText : 255);
+    for (int y = 0; y < _frame->h; ++y) {
+        for (int x = 0; x < _frame->w; ++x) {
+            _matrix.drawPixel(x, y, _frame->get(x, y));
+        }
+    }
     drawText(elapsedMs);
     _matrix.present();
 }

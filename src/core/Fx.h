@@ -67,7 +67,7 @@ public:
     static uint8_t level(const Particle& p);
 
     static constexpr size_t kMaxParticles = 220;
-    uint32_t launchEveryMs = 600;
+    uint32_t launchEveryMs = 450;
 
 private:
     void launch();

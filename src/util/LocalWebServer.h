@@ -7,6 +7,9 @@
 #include <esp_log.h>
 #include <esp_random.h>  // For secure token generation
 #include <functional>
+#include <string>
+#include <utility>
+#include <vector>
 
 class LocalWebServer {
 private:
@@ -44,7 +47,13 @@ private:
     // Raspy2DMD settings (/settings): every key of core/ConfigSchema, grouped by section.
     void handleSettings();
     void handleSaveSettings();
+    void handleSend();
     std::function<void()> onSettingsSaved;
+    std::function<bool(const std::string&)> onCommand;
+    std::function<std::vector<std::pair<std::string, std::string>>()> statusProvider;
+
+    // Shared look: dark theme, header with navigation (`active` = current path).
+    String page(const char* title, const char* active, const String& body) const;
     File uploadFile;
     String uploadTarget;
     bool uploadFailed = false;
@@ -63,6 +72,12 @@ public:
     void begin();
     // Called after /settings saved values that apply without a restart.
     void setOnSettingsSaved(std::function<void()> callback) { onSettingsSaved = std::move(callback); }
+    // "Send to the panel" on the home page: handled like an MQTT payload, returns false if rejected.
+    void setOnCommand(std::function<bool(const std::string&)> callback) { onCommand = std::move(callback); }
+    // Key/value lines for the home page status card.
+    void setStatusProvider(std::function<std::vector<std::pair<std::string, std::string>>()> provider) {
+        statusProvider = std::move(provider);
+    }
     void handleClient();
     bool isRunning() const;
 };
