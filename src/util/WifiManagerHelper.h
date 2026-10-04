@@ -1,46 +1,27 @@
 #ifndef WIFI_MANAGER_HELPER_H
 #define WIFI_MANAGER_HELPER_H
-#include <Arduino.h>
-#include <WiFiManager.h> 
-#include <esp_log.h>
-#define ESP_DRD_USE_SPIFFS true
-#define FORCE_RESET false
- 
-// Include Libraries
- 
-// WiFi Library
-#include <WiFi.h>
-// File System Library
-#include <FS.h>
-// SPI Flash Syetem Library
-#include <SPIFFS.h>
-// WiFiManager Library
-#include <WiFiManager.h>
-// Arduino JSON library
-#include <ArduinoJson.h>
-#include "ConfigHelper.h"
 
+// Joins the saved Wi-Fi network, or opens the DMD_CONFIG_WIFI setup portal where the user enters the
+// network and the MQTT settings. The portal is protected by a random password shown on the panel.
+
+#include <functional>
 #include <string>
- 
 
-class WifiManagerHelper
-{
-  private:
-    // Define the portal name
-    // Variables to hold data from custom textboxes
-    bool _shouldSaveConfig = false;    
-    bool _callbackRegistered = false;  
-    static void WiFiEvent(WiFiEvent_t event);
-    void applydefaultWifiSettings();
-    WiFiClient _wifiClient;  // Add this member
-  public:
-    void saveConfigFile(); 
-    bool loadConfigFile();
-    void saveConfigCallback();
-    void configModeCallback(WiFiManager *myWiFiManager);
-    void setWMUp(boolean forceConfig, char* hostname) ;
-    WiFiClient& getWIFIClient() {  // Return reference instead
-      return _wifiClient;
-    }
+class WifiManagerHelper {
+public:
+    static constexpr const char* kPortalName = "DMD_CONFIG_WIFI";
+
+    // Called once the portal is up, so the panel can show how to join it.
+    using PortalNotice = std::function<void(const std::string& ssid, const std::string& password)>;
+
+    // Returns once connected. Restarts the board if the portal fails or times out.
+    void connect(bool forcePortal, const PortalNotice& notice);
+
+    // 10 characters, no look-alike letters; a new one each time the portal opens.
+    static std::string newPortalPassword();
+
+private:
+    bool _saveRequested = false;
 };
+
 #endif

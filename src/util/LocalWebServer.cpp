@@ -1,14 +1,17 @@
 #include "LocalWebServer.h"
-#include <WiFi.h>      // ESP32 WiFi Library
-#include <FS.h>        // Include for File class
-#include <sstream>
+
+#include <WiFi.h>
+#include <esp_log.h>
+
 #include <cstring>
-#include <iomanip>
+
 #include "ConfigHelper.h"
 #include "core/ConfigSchema.h"
 #include "core/Media.h"
 #include "core/TextUtil.h"
-static const char* TAG = "LocalWebServer";
+#include "core/WebGuard.h"
+
+static const char* TAG = "Web";
 
 namespace {
 
@@ -82,51 +85,89 @@ String LocalWebServer::page(const char* title, const char* active, const String&
     return html;
 }
 
-LocalWebServer::LocalWebServer() : server(SERVER_PORT), tokenTimestamp(0), requestIndex(0) {
-    // 0 = free slot (the array used to start uninitialised, rate limiting at random).
-    for (auto& t : requestCounts) {
-        t = 0;
-    }
-    if (!storageBegin()) {
-        ESP_LOGE(TAG, "Filesystem not mounted");
-        return;
-    }
 
-    // Initialize server routes
-    server.on("/", std::bind(&LocalWebServer::handleRoot, this));
-    server.on("/config", std::bind(&LocalWebServer::handleConfig, this));
-    server.on("/get_config_json", std::bind(&LocalWebServer::handleGetConfigJson, this));
-    server.on("/save_config", HTTP_POST, std::bind(&LocalWebServer::handleSaveConfig, this));
-    server.on("/files", HTTP_GET, std::bind(&LocalWebServer::handleFiles, this));
-    server.on("/upload", HTTP_POST, std::bind(&LocalWebServer::handleUploadDone, this),
-              std::bind(&LocalWebServer::handleUpload, this));
-    server.on("/delete", HTTP_POST, std::bind(&LocalWebServer::handleDelete, this));
-    server.on("/settings", HTTP_GET, std::bind(&LocalWebServer::handleSettings, this));
-    server.on("/settings", HTTP_POST, std::bind(&LocalWebServer::handleSaveSettings, this));
-    server.on("/send", HTTP_POST, std::bind(&LocalWebServer::handleSend, this));
-    server.onNotFound(std::bind(&LocalWebServer::handleNotFound, this));
-
+LocalWebServer::LocalWebServer() : _server(80) {
+    static const char* kHeaders[] = {"Origin"};
+    _server.collectHeaders(kHeaders, 1);
+    route("/", HTTP_GET, &LocalWebServer::handleRoot);
+    route("/send", HTTP_POST, &LocalWebServer::handleSend);
+    route("/config", HTTP_GET, &LocalWebServer::handleConfig);
+    route("/config", HTTP_POST, &LocalWebServer::handleSaveConfig);
+    route("/files", HTTP_GET, &LocalWebServer::handleFiles);
+    route("/delete", HTTP_POST, &LocalWebServer::handleDelete);
+    route("/settings", HTTP_GET, &LocalWebServer::handleSettings);
+    route("/settings", HTTP_POST, &LocalWebServer::handleSaveSettings);
+    _server.on("/upload", HTTP_POST, [this]() { handleUploadDone(); }, [this]() { handleUpload(); });
+    _server.onNotFound([this]() { _server.send(404, "text/plain", "Not found"); });
 }
 
 void LocalWebServer::begin() {
-    server.begin();
-    ESP_LOGI(TAG, "HTTP server started on port %d", SERVER_PORT);
+    _server.begin();
+    ESP_LOGI(TAG, "Web pages on http://%s/", WiFi.localIP().toString().c_str());
 }
 
 void LocalWebServer::handleClient() {
-    server.handleClient();
+    if (WiFi.status() == WL_CONNECTED) {
+        _server.handleClient();
+    }
 }
 
-bool LocalWebServer::isRunning() const {
-    return WiFi.status() == WL_CONNECTED;
+void LocalWebServer::route(const char* path, HTTPMethod method, void (LocalWebServer::*handler)()) {
+    _server.on(path, method, [this, method, handler]() {
+        if (requestAllowed(method == HTTP_POST)) {
+            (this->*handler)();
+        }
+    });
 }
+
+int LocalWebServer::refusal(bool post) {
+    const std::string ip = WiFi.localIP().toString().c_str();
+    const std::string host = _server.hostHeader().c_str();
+    const std::string origin = _server.header("Origin").c_str();
+    if (!dmd::hostAllowed(host, ip, _hostname) || (post && !dmd::originAllowed(origin, ip, _hostname))) {
+        ESP_LOGW(TAG, "Refused %s (Host '%s', Origin '%s')", _server.uri().c_str(), host.c_str(), origin.c_str());
+        return 403;
+    }
+    return post && !checkRateLimit() ? 429 : 0;
+}
+
+bool LocalWebServer::requestAllowed(bool post) {
+    const int code = refusal(post);
+    if (code != 0) {
+        _server.send(code, "text/plain", code == 403 ? "Forbidden" : "Too many requests");
+    }
+    return code == 0;
+}
+
+bool LocalWebServer::checkRateLimit() {
+    const unsigned long now = millis();
+    int recent = 0;
+    for (unsigned long t : _requestTimes) {
+        if (t != 0 && now - t < kRateWindowMs) ++recent;
+    }
+    if (recent >= kMaxRequestsPerWindow) {
+        ESP_LOGW(TAG, "Rate limit reached");
+        return false;
+    }
+    _requestTimes[_requestIndex] = now == 0 ? 1 : now;
+    _requestIndex = (_requestIndex + 1) % kMaxRequestsPerWindow;
+    return true;
+}
+
+void LocalWebServer::redirect(const char* location) {
+    _server.sendHeader("Location", location);
+    _server.send(303);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Dashboard
 
 void LocalWebServer::handleRoot() {
     String body = F("<h1>Panel</h1>");
-    if (server.hasArg("sent")) {
-        body += server.arg("sent") == "1" ? F("<div class='card'>Sent to the panel.</div>")
-                                         : F("<div class='card'>Rejected: unknown command, bad score, or "
-                                             "not allowed in standalone mode.</div>");
+    if (_server.hasArg("sent")) {
+        body += _server.arg("sent") == "1" ? F("<div class='card'>Sent to the panel.</div>")
+                                          : F("<div class='card'>Rejected: unknown command, bad score, or "
+                                              "not allowed in standalone mode.</div>");
     }
     body += F("<div class='card'><h2>Send to the panel</h2>"
               "<form method='post' action='/send'><div class='row'>"
@@ -142,9 +183,9 @@ void LocalWebServer::handleRoot() {
     }
     body += F("</form></div><p class='muted'>Same messages as Raspydarts sends over MQTT; see "
               "docs/PORTING.md for the full list.</p></div>");
-    if (statusProvider) {
+    if (_statusProvider) {
         body += F("<div class='card'><h2>Status</h2><div class='kv'>");
-        for (const auto& kv : statusProvider()) {
+        for (const auto& kv : _statusProvider()) {
             body += "<div><span>";
             body += dmd::htmlEscape(kv.first).c_str();
             body += "</span><b>";
@@ -153,182 +194,70 @@ void LocalWebServer::handleRoot() {
         }
         body += F("</div></div>");
     }
-    server.send(200, "text/html", page("Panel", "/", body));
+    _server.send(200, "text/html", page("Panel", "/", body));
 }
 
 void LocalWebServer::handleSend() {
-    if (!checkRateLimit()) {
-        server.send(429, "text/plain", "Too many requests");
-        return;
-    }
-    const std::string cmd = server.arg("cmd").c_str();
-    const bool ok = !cmd.empty() && onCommand && onCommand(cmd);
-    server.sendHeader("Location", ok ? "/?sent=1" : "/?sent=0");
-    server.send(303);
+    const std::string cmd = _server.arg("cmd").c_str();
+    const bool ok = !cmd.empty() && _onCommand && _onCommand(cmd);
+    redirect(ok ? "/?sent=1" : "/?sent=0");
 }
+
+////////////////////////////////////////////////////////////////////////////////
+// Portal values (/config): read at start-up, so saving restarts the board.
+
+namespace {
+
+const char* const kPortalFields[][2] = {
+    {"mqtt_url", "MQTT broker"}, {"mqtt_path", "MQTT topic"}, {"hostname", "Hostname"}};
+constexpr size_t kMaxPortalValue = 255;
+
+}  // namespace
 
 void LocalWebServer::handleConfig() {
-    String jsonString = readConfigFile();
-    if (jsonString.isEmpty()) {
-        return;
-    }
-    
-    server.send(200, "text/html", page("Wi-Fi & MQTT", "/config", generateConfigForm(jsonString)));
-    ESP_LOGD(TAG, "Config page served");
-}
-
-String LocalWebServer::generateConfigForm(const String& jsonString) {
-    // Values can come from MQTT (conf): escape everything that goes into the page.
+    const ConfigHelper& config = ConfigHelper::getInstance();
+    const std::string values[] = {config.getMqttUrl(), config.getMqttPath(), config.getHostname()};
     String html = F("<h1>Wi-Fi &amp; MQTT</h1><div class='card'><h2>Connection</h2>"
-                    "<form action='/save_config' method='post'>");
-
-    DynamicJsonDocument doc(JSON_CAPACITY);
-    deserializeJson(doc, jsonString);
-
-    for (JsonPair pair : doc.as<JsonObject>()) {
-        // Nested objects (the Raspy2DMD "settings" set over MQTT) are not editable here.
-        if (pair.value().is<JsonObject>() || pair.value().is<JsonArray>()) {
-            continue;
-        }
-        const std::string key = dmd::htmlEscape(pair.key().c_str());
-        const std::string value = dmd::htmlEscape(pair.value().as<String>().c_str());
+                    "<form method='post' action='/config'>");
+    for (size_t i = 0; i < 3; ++i) {
         html += "<div class='f'><label>";
-        html += key.c_str();
-        html += "</label><input type='text' name='";
-        html += key.c_str();
+        html += kPortalFields[i][1];
+        html += "</label><input name='";
+        html += kPortalFields[i][0];
         html += "' value='";
-        html += value.c_str();
+        html += dmd::htmlEscape(values[i]).c_str();
         html += "'></div>";
     }
-
-    html += F("<p><input type='submit' value='Save'></p></form></div><div class='card'><h2>config.json</h2><pre>");
-    html += dmd::htmlEscape(jsonString.c_str()).c_str();
-    html += F("</pre></div>");
-    return html;
-}
-
-void LocalWebServer::handleGetConfigJson() {
-    String jsonString = readConfigFile();
-    if (!jsonString.isEmpty()) {
-        server.send(200, "application/json", jsonString);
-        ESP_LOGD(TAG, "JSON config served: %s", jsonString.c_str());
-    }
-}
-
-String LocalWebServer::readConfigFile() {
-    File configFile = storage().open(CONFIG_FILE, "r");
-    if (!configFile) {
-        server.send(500, "text/plain", "Failed to open config file");
-        ESP_LOGE(TAG, "Failed to open %s for reading", CONFIG_FILE);
-        return String();
-    }
-    
-    String jsonString = configFile.readString();
-    configFile.close();
-    return jsonString;
-}
-
-// Handling not found pages:
-void LocalWebServer::handleNotFound() {
-    String message = "File Not Found\n\n";
-    message += "URI: " + server.uri();
-    ESP_LOGW(TAG, "404 Not Found: %s", server.uri().c_str());
-    server.send(404, "text/plain", message);
+    html += F("<p class='muted'>Saving restarts the board. To change the Wi-Fi network, erase the board or "
+              "move it out of range: the setup portal opens when it cannot connect.</p>"
+              "<input type='submit' value='Save'></form></div>");
+    _server.send(200, "text/html", page("Wi-Fi & MQTT", "/config", html));
 }
 
 void LocalWebServer::handleSaveConfig() {
-    if (!checkSecurityToken() || !checkRateLimit()) {
-        server.send(403, "text/plain", "Access denied");
-        return;
-    }
-
-    if (server.args() == 0) {
-        server.send(400, "text/plain", "No arguments received");
-        ESP_LOGW(TAG, "No arguments received in save config POST request");
-        return;
-    }
-
-    // Merge into the existing file so keys missing from the form (e.g. "settings") survive.
-    DynamicJsonDocument doc(JSON_CAPACITY);
-    File existing = storage().open(CONFIG_FILE, "r");
-    if (existing) {
-        if (deserializeJson(doc, existing)) {
-            doc.clear();
-        }
-        existing.close();
-    }
-    for (uint8_t i = 0; i < server.args(); i++) {
-        doc[server.argName(i)] = server.arg(i);
-        ESP_LOGD(TAG, "POST param '%s' = '%s'", 
-                 server.argName(i).c_str(), server.arg(i).c_str());
-    }
-
-    if (saveConfigToFile(doc)) {
-        server.send(200, "text/plain", "Configuration saved successfully!");
-        ESP_LOGI(TAG, "Configuration saved to %s", CONFIG_FILE);
-    }
-}
-
-bool LocalWebServer::saveConfigToFile(DynamicJsonDocument& doc) {
-    File configFile = storage().open(CONFIG_FILE, "w");
-    if (!configFile) {
-        server.send(500, "text/plain", "Failed to open config file for writing");
-        ESP_LOGE(TAG, "Failed to open %s for writing", CONFIG_FILE);
-        return false;
-    }
-    
-    serializeJsonPretty(doc, configFile);
-    configFile.close();
-    return true;
-}
-
-void LocalWebServer::generateSecurityToken() {
-    uint32_t random = esp_random();  // Get hardware random number
-    std::stringstream ss;
-    ss << std::hex << std::setfill('0') << std::setw(8) << random;
-    securityToken = ss.str().c_str();
-    tokenTimestamp = millis();
-    ESP_LOGI(TAG, "New security token generated");
-}
-
-bool LocalWebServer::checkSecurityToken() {
-    // if (!server.hasHeader(SECURITY_HEADER)) {
-    //     ESP_LOGW(TAG, "Missing security token");
-    //     return false;
-    // }
-    
-    // String token = server.header(SECURITY_HEADER);
-    // if (token != securityToken || (millis() - tokenTimestamp) > TOKEN_VALIDITY) {
-    //     ESP_LOGW(TAG, "Invalid or expired security token");
-    //     return false;
-    // }
-    
-    return true;
-}
-
-bool LocalWebServer::checkRateLimit() {
-    unsigned long now = millis();
-    int count = 0;
-    
-    // Count requests in current window
-    for (int i = 0; i < MAX_REQUESTS; i++) {
-        if (requestCounts[i] != 0 && now - requestCounts[i] < RATE_LIMIT_WINDOW) {
-            count++;
+    std::string values[3];
+    for (size_t i = 0; i < 3; ++i) {
+        values[i] = _server.arg(kPortalFields[i][0]).c_str();
+        if (values[i].empty() || values[i].size() > kMaxPortalValue) {
+            _server.send(400, "text/plain", "Every field is required (255 characters at most)");
+            return;
         }
     }
-    
-    if (count >= MAX_REQUESTS) {
-        ESP_LOGW(TAG, "Rate limit exceeded");
-        return false;
+    ConfigHelper& config = ConfigHelper::getInstance();
+    config.setMqttUrl(values[0]);
+    config.setMqttPath(values[1]);
+    config.setHostname(values[2]);
+    if (!config.saveConfigFile()) {
+        _server.send(500, "text/plain", "Cannot write the configuration");
+        return;
     }
-    
-    // Store new request timestamp
-    requestCounts[requestIndex] = now;
-    requestIndex = (requestIndex + 1) % MAX_REQUESTS;
-    return true;
+    _server.send(200, "text/plain", "Saved, restarting...");
+    delay(500);
+    ESP.restart();
 }
+
 ////////////////////////////////////////////////////////////////////////////////
-// Media file manager
+// Media files
 
 void LocalWebServer::handleFiles() {
     const unsigned usedKb = static_cast<unsigned>(LittleFS.usedBytes() / 1024);
@@ -357,7 +286,7 @@ void LocalWebServer::handleFiles() {
         html += escaped.c_str();
         snprintf(line, sizeof(line), "</td><td class='n'>%u KB</td><td class='n'>", (size + 1023) / 1024);
         html += line;
-        if (path != CONFIG_FILE) {
+        if (path != ConfigHelper::kFile) {
             html += "<form method='post' action='/delete'><input type='hidden' name='path' value='";
             html += escaped.c_str();
             html += "'><button class='del' title='Delete'>&#10005;</button></form>";
@@ -365,66 +294,64 @@ void LocalWebServer::handleFiles() {
         html += "</td></tr>";
     }
     html += F("</table></div>");
-    server.send(200, "text/html", page("Media", "/files", html));
+    _server.send(200, "text/html", page("Media", "/files", html));
 }
 
 void LocalWebServer::handleUpload() {
-    HTTPUpload& upload = server.upload();
+    HTTPUpload& upload = _server.upload();
     if (upload.status == UPLOAD_FILE_START) {
-        uploadFailed = false;
-        const std::string target = dmd::uploadPath(server.arg("dir").c_str(), upload.filename.c_str());
-        if (target.empty() || target == CONFIG_FILE) {
-            ESP_LOGW(TAG, "Upload refused: '%s' into '%s'", upload.filename.c_str(), server.arg("dir").c_str());
-            uploadFailed = true;
+        _uploadRefusal = refusal(true);
+        _uploadTarget = dmd::uploadPath(_server.arg("dir").c_str(), upload.filename.c_str());
+        _uploadFailed = _uploadRefusal != 0 || _uploadTarget.empty() || _uploadTarget == ConfigHelper::kFile;
+        if (_uploadFailed) {
+            ESP_LOGW(TAG, "Upload refused: '%s' into '%s'", upload.filename.c_str(), _server.arg("dir").c_str());
+            _uploadTarget.clear();
             return;
         }
-        storageMakeParents(target);
-        uploadTarget = target.c_str();
-        uploadFile = storage().open(target.c_str(), "w");
-        uploadFailed = !uploadFile;
-        ESP_LOGI(TAG, "Upload started: %s", target.c_str());
+        storageMakeParents(_uploadTarget);
+        _uploadFile = storage().open(_uploadTarget.c_str(), "w");
+        _uploadFailed = !_uploadFile;
     } else if (upload.status == UPLOAD_FILE_WRITE) {
-        if (!uploadFailed && uploadFile.write(upload.buf, upload.currentSize) != upload.currentSize) {
+        if (!_uploadFailed && _uploadFile.write(upload.buf, upload.currentSize) != upload.currentSize) {
             ESP_LOGE(TAG, "Upload write failed (filesystem full?)");
-            uploadFailed = true;
+            _uploadFailed = true;
         }
-    } else if (upload.status == UPLOAD_FILE_END || upload.status == UPLOAD_FILE_ABORTED) {
-        if (uploadFile) {
-            uploadFile.close();
+    } else {  // UPLOAD_FILE_END or UPLOAD_FILE_ABORTED
+        if (_uploadFile) {
+            _uploadFile.close();
         }
-        if ((uploadFailed || upload.status == UPLOAD_FILE_ABORTED) && uploadTarget.length()) {
-            storage().remove(uploadTarget.c_str());  // never leave a truncated file behind
-            uploadFailed = true;
+        if (upload.status != UPLOAD_FILE_END) {
+            _uploadFailed = true;
         }
-        ESP_LOGI(TAG, "Upload %s: %s (%u bytes)", uploadFailed ? "failed" : "done", uploadTarget.c_str(),
+        if (_uploadFailed && !_uploadTarget.empty()) {
+            storage().remove(_uploadTarget.c_str());  // never leave a truncated file behind
+        }
+        ESP_LOGI(TAG, "Upload %s: %s (%u bytes)", _uploadFailed ? "failed" : "done", _uploadTarget.c_str(),
                  static_cast<unsigned>(upload.totalSize));
-        uploadTarget = "";
+        _uploadTarget.clear();
     }
 }
 
 void LocalWebServer::handleUploadDone() {
-    if (uploadFailed) {
-        server.send(400, "text/plain", "Upload failed (bad name or folder, or filesystem full)");
-        return;
+    if (_uploadRefusal != 0) {
+        _server.send(_uploadRefusal, "text/plain", _uploadRefusal == 403 ? "Forbidden" : "Too many requests");
+    } else if (_uploadFailed) {
+        _server.send(400, "text/plain", "Upload failed (bad name or folder, or filesystem full)");
+    } else {
+        redirect("/files");
     }
-    server.sendHeader("Location", "/files");
-    server.send(303);
 }
 
 void LocalWebServer::handleDelete() {
-    if (!checkRateLimit()) {
-        server.send(429, "text/plain", "Too many requests");
+    const std::string path = _server.arg("path").c_str();
+    if (path.empty() || path[0] != '/' || path == ConfigHelper::kFile || path.find("..") != std::string::npos ||
+        !storageExists(path)) {
+        _server.send(400, "text/plain", "Cannot delete this file");
         return;
     }
-    const String path = server.arg("path");
-    if (path.length() == 0 || path == CONFIG_FILE || path.indexOf("..") >= 0 || !storage().exists(path)) {
-        server.send(400, "text/plain", "Cannot delete this file");
-        return;
-    }
-    storage().remove(path);
+    storage().remove(path.c_str());
     ESP_LOGI(TAG, "Deleted %s", path.c_str());
-    server.sendHeader("Location", "/files");
-    server.send(303);
+    redirect("/files");
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -446,36 +373,31 @@ void LocalWebServer::handleSettings() {
             html += "</legend>";
         }
         const std::string name = std::string(def.section) + "." + def.key;
-        const std::string value = config.getSetting(def.section, def.key, def.def);
         html += def.usedOnEsp32 ? "<div class='f'><label>" : "<div class='f off'><label>";
         html += def.key;
         html += "</label><input name='";
         html += dmd::htmlEscape(name).c_str();
         html += "' value='";
-        html += dmd::htmlEscape(value).c_str();
+        html += dmd::htmlEscape(config.getSetting(def.section, def.key, def.def)).c_str();
         html += "'></div>";
     }
     html += F("</fieldset><input type='submit' value='Save'></form>");
-    server.send(200, "text/html", page("Settings", "/settings", html));
+    _server.send(200, "text/html", page("Settings", "/settings", html));
 }
 
 void LocalWebServer::handleSaveSettings() {
-    if (!checkRateLimit()) {
-        server.send(429, "text/plain", "Too many requests");
-        return;
-    }
     ConfigHelper& config = ConfigHelper::getInstance();
     bool restart = false;
     int changed = 0;
-    for (int i = 0; i < server.args(); i++) {
-        const std::string name = server.argName(i).c_str();
+    for (int i = 0; i < _server.args(); i++) {
+        const std::string name = _server.argName(i).c_str();
         const size_t dot = name.find('.');
         if (dot == std::string::npos) continue;
         const std::string section = name.substr(0, dot);
         const std::string key = name.substr(dot + 1);
         const dmd::SettingDef* def = dmd::findSetting(section, key);
         if (!def) continue;  // only known Raspy2DMD keys
-        const std::string value = server.arg(i).c_str();
+        const std::string value = _server.arg(i).c_str();
         if (config.getSetting(section, key, def->def) == value) continue;
         config.setSetting(section, key, value);
         restart = restart || dmd::needsRestart(section, key);
@@ -486,14 +408,13 @@ void LocalWebServer::handleSaveSettings() {
         ESP_LOGI(TAG, "%d setting(s) saved from the web page", changed);
     }
     if (restart) {
-        server.send(200, "text/plain", "Saved, restarting to apply the panel / standalone settings...");
+        _server.send(200, "text/plain", "Saved, restarting to apply the panel / standalone settings...");
         delay(500);
         ESP.restart();
         return;
     }
-    if (changed > 0 && onSettingsSaved) {
-        onSettingsSaved();
+    if (changed > 0 && _onSettingsSaved) {
+        _onSettingsSaved();
     }
-    server.sendHeader("Location", "/settings");
-    server.send(303);
+    redirect("/settings");
 }

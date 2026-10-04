@@ -35,8 +35,9 @@ ClockSpec clockSpec() {
     spec.fg = rgbSetting("ClockRenderer", "defaultfontcolor_clock", dmd::Rgb{0, 0, 255});
     spec.shadow = rgbSetting("ClockRenderer", "defaultfontcolor_clockshadow", dmd::Rgb{255, 0, 0});
     spec.maxFontPx = static_cast<int>(intSetting("TextRenderer", "maxfontsize", 30));
-    const std::string pattern = strSetting("ClockRenderer", "clockBackgroundImage", "OldGame.png");
-    spec.pattern = pattern.empty() ? "" : std::string(dmd::media::kPatterns) + "/" + pattern;
+    // Empty means "default" here too; a missing file just leaves the background black.
+    spec.pattern = std::string(dmd::media::kPatterns) + "/" +
+                   strSetting("ClockRenderer", "clockBackgroundImage", "OldGame.png");
     return spec;
 }
 

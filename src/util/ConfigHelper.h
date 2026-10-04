@@ -1,82 +1,51 @@
-/**
- * This file load a configuration file header file
- * * @param _mqtt_url_str The MQTT URL string to be loaded
- * * @param _mqtt_path_str The MQTT path string to be loaded
- * * @param _hostname The hostname string to be loaded
- * * @return true if the configuration was loaded successfully, false otherwise
- * 
- *  */
-
- // File System Library
 #ifndef CONFIG_HELPER_H
 #define CONFIG_HELPER_H
 
-// SPI Flash Syetem Library
+// /config.json: the portal values (MQTT broker, topic, hostname), the brightness, and the Raspy2DMD
+// settings set with conf|Section|key:value or the settings page, stored under "settings" as
+// "Section.key" (keys lower-cased, like configparser).
+
 #include <map>
 #include <string>
-#include "Storage.h"
-#include <Arduino.h>
-#include <FS.h>
-#include <ArduinoJson.h>
-#include <esp_log.h>
 
+class ConfigHelper {
+public:
+    static constexpr const char* kFile = "/config.json";
 
-// JSON configuration file
-#define JSON_CONFIG_FILE "/config.json"
-
-
-class ConfigHelper
-{
-  private:
-    //nothing
-    // Variables to hold data from custom textboxes
-    std::string  _mqtt_url;
-    std::string  _mqtt_path;
-    std::string  _hostname;
-    int _brightness = 90;                 // [DMDRenderer] brightness, percent
-    std::string _brightnessHours;         // [DMDRenderer] brightnesshours, 24 comma-separated percents
-    boolean _configLoaded = false; // Flag to check if config was saved
-    // Raspy2DMD settings received with conf|Section|key:value, keyed "Section.key".
-    // Persisted under "settings" in config.json; callers supply the Raspy2DMD defaults.
-    std::map<std::string, std::string> _settings;
-
-    static ConfigHelper* _instance; // Static instance pointer
-    // Private constructor to prevent public instantiation
-    ConfigHelper();
-    // Private method
-    bool initConfigFile();
-
-  public:
-    void saveConfigFile(); 
-    bool loadConfigFile();
-    // Getter and Setter declarations for _mqtt_url
     static ConfigHelper& getInstance();
-    const std::string getMqttUrl() const;
-    void setMqttUrl(const std::string mqttUrl);
 
-    // Getter and Setter declarations for _mqtt_path
-    const std::string getMqttPath() const;
-    void setMqttPath(std::string mqttPath);
+    // Reads the file, replacing everything in memory. False when the file is missing or lacks
+    // the portal values (the setup portal is then opened).
+    bool loadConfigFile();
+    bool saveConfigFile() const;
 
-    // Getter and Setter declarations for _hostname
-    const std::string getHostname() const;
-    void setHostname(std::string hostname);
+    const std::string& getMqttUrl() const { return _mqttUrl; }
+    const std::string& getMqttPath() const { return _mqttPath; }
+    const std::string& getHostname() const { return _hostname; }
+    void setMqttUrl(const std::string& value) { _mqttUrl = value; }
+    void setMqttPath(const std::string& value) { _mqttPath = value; }
+    void setHostname(const std::string& value) { _hostname = value; }
 
-    // [DMDRenderer] brightness (0..100 %) and brightnesshours (24 comma-separated percents)
+    // [DMDRenderer] brightness (0..100 %) and brightnesshours (24 comma-separated percents).
     int getBrightness() const { return _brightness; }
-    void setBrightness(int brightness) { _brightness = brightness; }
+    void setBrightness(int percent) { _brightness = percent; }
     const std::string& getBrightnessHours() const { return _brightnessHours; }
     void setBrightnessHours(const std::string& hours) { _brightnessHours = hours; }
 
+    // `fallback` when the setting is absent or empty.
     std::string getSetting(const std::string& section, const std::string& key, const std::string& fallback) const;
     long getSettingInt(const std::string& section, const std::string& key, long fallback) const;
     void setSetting(const std::string& section, const std::string& key, const std::string& value);
 
-    boolean isConfigLoaded() const {
-        return _configLoaded;
-    }
-    ~ConfigHelper();
+private:
+    ConfigHelper() = default;
 
-
+    std::string _mqttUrl;
+    std::string _mqttPath;
+    std::string _hostname;
+    int _brightness = 90;
+    std::string _brightnessHours;
+    std::map<std::string, std::string> _settings;
 };
-#endif
+
+#endif

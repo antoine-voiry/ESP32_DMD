@@ -12,6 +12,9 @@ static const char* TAG = "Bitmap";
 
 namespace {
 
+// Uploaded PNGs are meant to be panel-sized; this bounds the memory a decode can take.
+constexpr int kMaxPngSide = 1024;
+
 struct PngContext {
     PNG* png;
     Bitmap565* bitmap;
@@ -68,25 +71,30 @@ int pngDraw(PNGDRAW* draw) {
 
 std::shared_ptr<Bitmap565> loadPng(const std::string& path, int w, int h, bool center) {
     std::unique_ptr<PNG> png(new PNG());  // ~40 KB of decoder state: keep it off the stack
-    if (png->open(path.c_str(), pngOpen, pngClose, pngRead, pngSeek, pngDraw) != PNG_SUCCESS) {
-        ESP_LOGW(TAG, "Cannot open PNG %s", path.c_str());
+    // open() returns PNG_SUCCESS when the file cannot be opened, and keeps the file open when the
+    // header is invalid: check the size and always close.
+    const int opened = png->open(path.c_str(), pngOpen, pngClose, pngRead, pngSeek, pngDraw);
+    const int srcW = png->getWidth();
+    const int srcH = png->getHeight();
+    if (opened != PNG_SUCCESS || srcW <= 0 || srcH <= 0 || srcW > kMaxPngSide || srcH > kMaxPngSide) {
+        ESP_LOGW(TAG, "Cannot show %s (%dx%d, error %d)", path.c_str(), srcW, srcH, opened);
+        png->close();
         return nullptr;
     }
     std::shared_ptr<Bitmap565> bitmap = std::make_shared<Bitmap565>(w, h);
     PngContext ctx;
     ctx.png = png.get();
     ctx.bitmap = bitmap.get();
-    ctx.srcW = png->getWidth();
-    ctx.srcH = png->getHeight();
-    ctx.rect = dmd::fitImage(ctx.srcW, ctx.srcH, w, h, center);
-    ctx.line.assign(static_cast<size_t>(ctx.srcW), 0);
+    ctx.srcW = srcW;
+    ctx.srcH = srcH;
+    ctx.rect = dmd::fitImage(srcW, srcH, w, h, center);
+    ctx.line.assign(static_cast<size_t>(srcW), 0);
     const int rc = png->decode(&ctx, 0);
     png->close();
     if (rc != PNG_SUCCESS) {
         ESP_LOGW(TAG, "PNG decode error %d for %s", rc, path.c_str());
         return nullptr;
     }
-    ESP_LOGD(TAG, "Loaded %s (%dx%d -> %dx%d)", path.c_str(), ctx.srcW, ctx.srcH, ctx.rect.w, ctx.rect.h);
     return bitmap;
 }
 

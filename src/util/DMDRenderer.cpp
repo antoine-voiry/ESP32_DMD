@@ -21,9 +21,7 @@ static bool isBigMove(const std::string& move) {
            move == "HAT_TRICK" || move == "CHAMPAGNE_BREAKFAST";
 }
 
-DMDRenderer::DMDRenderer(Hub75_Matrix* matrix) : _dmd(matrix) {
-    ESP_LOGI(TAG, "Initializing DMDRenderer");
-}
+DMDRenderer::DMDRenderer(Hub75_Matrix* matrix) : _dmd(matrix) {}
 
 void DMDRenderer::update() {
     _runner.update(millis());
@@ -83,24 +81,20 @@ void DMDRenderer::renderScore(const std::string& score, uint32_t holdMs) {
                 if (c == '_') c = ' ';
             }
             ESP_LOGI(TAG, "Special move: %s", move.c_str());
-            if (!_celebrations) {
-                renderText(label, kSpecialMoveHoldMs);
+            FxSpec fx;
+            fx.text = label;
+            fx.fg = _defaults.fg;
+            fx.maxCharsPerLine = _defaults.maxCharsPerLine;
+            fx.maxFontPx = _defaults.maxFontPx;
+            if (isBigMove(move)) {
+                fx.background = dmd::FxBackground::Fireworks;
+                fx.textFx = dmd::FxText::Rainbow;
+                fx.durationMs = kBigCelebrationMs;
             } else {
-                FxSpec fx;
-                fx.text = label;
-                fx.fg = _defaults.fg;
-                fx.maxCharsPerLine = _defaults.maxCharsPerLine;
-                fx.maxFontPx = _defaults.maxFontPx;
-                if (isBigMove(move)) {
-                    fx.background = dmd::FxBackground::Fireworks;
-                    fx.textFx = dmd::FxText::Rainbow;
-                    fx.durationMs = kBigCelebrationMs;
-                } else {
-                    fx.textFx = dmd::FxText::Sparkle;
-                    fx.durationMs = kSpecialMoveHoldMs;
-                }
-                renderFx(fx);
+                fx.textFx = dmd::FxText::Sparkle;
+                fx.durationMs = kSpecialMoveHoldMs;
             }
+            renderFx(fx);
         }
     }
     renderText(upper, holdMs);

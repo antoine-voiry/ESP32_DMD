@@ -1,48 +1,51 @@
 #ifndef MQTTHELPER_H
 #define MQTTHELPER_H
-#include <ESPmDNS.h>  // Add this include for mDNS support
+
+// MQTT connection to the Raspydarts broker: subscribes to the DMD topic and queues the payloads
+// for loop(), which renders them in arrival order.
+
 #include <PubSubClient.h>
 #include <WiFi.h>
-#include <deque>
-#include <vector>
-#include <string>
-#include <esp_log.h>
 
-#define MQTT_MAX_RETRIES 5
-#define MQTT_RETRY_DELAY 500
-#define MAX_MESSAGE_COUNT 10
+#include <cstdint>
+#include <deque>
+#include <string>
+#include <vector>
 
 class MQTTHelper {
-    private:
-        MQTTHelper() = delete; // Prevent default constructor
-        PubSubClient _mqttClient;
-        std::string _mqtt_url;
-        std::string _mqtt_client_id;
-        std::string _mqtt_topic;
-        std::deque<std::string> messageQueue;  // FIFO: messages are rendered in arrival order
-        
-        // Reconnection handling
-        unsigned long lastReconnectAttempt = 0;
-        uint16_t retryCount = 0;
-        uint16_t getRetryCount() const { return retryCount; }
-        void resetRetryCount() { retryCount = 0; }
-        boolean shouldRetry();
-        
+public:
+    static constexpr uint16_t kPort = 1883;
+    // Payloads beyond this many waiting messages are dropped (oldest first), so a flood of
+    // messages cannot exhaust the heap.
+    static constexpr size_t kMaxQueued = 32;
+    static constexpr uint32_t kRetryMs = 5000;
 
-        void handleCallback(char* topic, byte* payload, unsigned int length);
-     
-        boolean connect(); 
-    public:
-        MQTTHelper(std::string mqtt_url, 
-                   std::string mqtt_client_id, 
-                   std::string mqtt_topic);
-                   
-        std::vector<std::string> unStackMessages(int maxCount = MAX_MESSAGE_COUNT);
-        void loop();
-        boolean handleConnect();
-        // Publishes on the broker we are connected to; false when disconnected or too long for the buffer.
-        bool publish(const std::string& topic, const std::string& payload);
-        ~MQTTHelper();
-    };
+    MQTTHelper(std::string host, std::string clientId, std::string topic);
 
-#endif // MQTTHELPER_H
+    // Keeps the connection up (one attempt every kRetryMs) and reads incoming packets.
+    // Returns true while connected.
+    bool loop(uint32_t nowMs);
+
+    // Received payloads, oldest first, at most maxCount.
+    std::vector<std::string> takeMessages(size_t maxCount = 10);
+
+    // False when disconnected or when the message does not fit the client buffer.
+    bool publish(const std::string& topic, const std::string& payload);
+
+    size_t droppedMessages() const { return _dropped; }
+
+private:
+    void onMessage(const char* topic, const uint8_t* payload, unsigned int length);
+
+    WiFiClient _net;
+    PubSubClient _client;
+    std::string _host;
+    std::string _clientId;
+    std::string _topic;
+    std::deque<std::string> _queue;
+    size_t _dropped = 0;
+    uint32_t _lastAttemptMs = 0;
+    bool _attempted = false;
+};
+
+#endif

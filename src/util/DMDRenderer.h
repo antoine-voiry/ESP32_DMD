@@ -65,9 +65,6 @@ public:
     // Port of RunTime(): date and/or time for the configured durations.
     void renderClock(ClockSpec spec, uint32_t holdMs = 0);
 
-    // Celebrate special moves with an animation instead of plain text (default on).
-    void setCelebrations(bool enabled) { _celebrations = enabled; }
-
     // Status line shown by the firmware itself (MQTT down, ...), replaces whatever is queued.
     void renderStatus(const std::string& text);
 
@@ -83,7 +80,6 @@ private:
     Hub75_Matrix* _dmd;
     dmd::SceneRunner _runner;
     TextStyle _defaults;
-    bool _celebrations = true;
     bool _centerImages = true;
     MediaLibrary* _media = nullptr;
 };

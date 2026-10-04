@@ -63,3 +63,5 @@ test/.piolibdeps/
 .vscode/ipch
 *.log
 build/
+# Host test dependencies (make -C test/host deps)
+test/host/deps/

@@ -2,7 +2,8 @@
 #define MESSAGE_HANDLER_H
 
 // Port of UnstackMessages() from Raspy2DMD ServerRaspy2DMD.py: maps "action|args" payloads
-// to DMDRenderer calls. Payloads are expected to have passed MessageFilter first.
+// to DMDRenderer calls. Payloads are expected to have passed
+// dmd::isAcceptedPayload() first.
 
 #include <functional>
 #include <map>
@@ -29,13 +30,12 @@ private:
     bool restartPending = false;
     MessageHandler() = delete;
     void setupHandlers();
-    void notPortedYet(const char* action, const char* phase);
     void applyConf(const std::vector<std::string>& params);
     // RenderSoundEffet(): GIF with text, text, GIF, or (no audio here) nothing.
     void playEffect(const std::string& text, const std::string& gif, const std::string& sound);
-    // "|N" trailing argument at index i (seconds) -> milliseconds, 0 when absent or invalid.
     // Effect duration in seconds at index i -> milliseconds (default 5 s, capped at 10 min).
     static uint32_t effectDuration(const std::vector<std::string>& params, size_t i);
+    // "|N" trailing argument at index i (seconds) -> milliseconds, 0 when absent or invalid.
     static uint32_t holdArg(const std::vector<std::string>& params, size_t i);
 
 public:

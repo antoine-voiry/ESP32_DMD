@@ -27,9 +27,9 @@ dmd::OwmConfig owmConfig();
 
 // [Running]
 std::string scrollOrder();
-uint32_t attractAfterMs();
+uint32_t attractAfterMs();  // Running.attract_mode seconds -> ms, 0 = disabled
 bool standalone();       // Running.standalone == 1
-bool showWebAddress();   // Running.default != 0: RenderFirstStart() shows the web address  // attract_mode seconds -> ms, 0 = disabled
+bool showWebAddress();   // Running.default != 0: RenderFirstStart() shows the web address
 
 }  // namespace settings
 

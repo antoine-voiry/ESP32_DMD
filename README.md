@@ -54,8 +54,9 @@ renderer. It accepts the same messages and settings, with no Pi needed.
    pio run -t upload && pio device monitor
    ```
 
-3. **Connect it.** Join the `DMD_CONFIG_WIFI` access point, then enter your Wi-Fi network, the MQTT broker
-   (usually `raspydarts.local`), the topic and a hostname.
+3. **Connect it.** The panel shows `WiFi DMD_CONFIG_WIFI` and a password: join that access point with
+   it, then enter your Wi-Fi network, the MQTT broker (usually `raspydarts.local`), the topic and a
+   hostname. The portal opens again whenever the saved network cannot be reached.
 
 4. **Play.** Raspydarts now drives the panel. To try it by hand:
 
@@ -64,7 +65,8 @@ renderer. It accepts the same messages and settings, with no Pi needed.
    mosquitto_pub -h raspydarts.local -t raspydarts/dmd -m 'fx|fireworks|10'
    ```
 
-   You can also open `http://<board-ip>/` (shown on the panel at start-up), type a command, or pick a preset.
+   You can also open `http://<hostname>.local/` or `http://<board-ip>/` (shown on the panel at start-up),
+   type a command, or pick a preset.
 
 ## Web interface
 
@@ -75,7 +77,7 @@ renderer. It accepts the same messages and settings, with no Pi needed.
 | `/` | Board status (IP, Wi-Fi, MQTT, uptime, memory, storage), a send box and presets |
 | `/settings` | Every Raspy2DMD setting, grouped by section. Settings with no effect on the ESP32 are greyed out |
 | `/files` | Upload, browse and delete GIFs, images, carousel texts and `effets.txt` (about 900 KB of LittleFS) |
-| `/config` | Wi-Fi portal values: MQTT broker, topic, hostname |
+| `/config` | MQTT broker, topic and hostname (saving restarts the board) |
 
 ## How it works
 
@@ -108,17 +110,22 @@ flowchart LR
 | `src/render` | Scenes drawn on the panel |
 | `src/util` | Firmware services: MQTT, Wi-Fi, web server, settings, storage, attract mode, NTP |
 | `src/matrix` | HUB75 DMA driver wrapper |
-| `test/host` | Host unit tests |
+| `test/host` | Host tests; `fakes/` stands in for the ESP32 libraries |
 | `tools/preview` | Renders the README previews |
 
 ## Tests
 
 ```bash
-make -C test/host                                      # core tests (ASan + UBSan) and a C++11 compile check
-make -C test/host json ARDUINOJSON=<ArduinoJson>/src   # JSON parser tests
+make -C test/host            # core logic (ASan + UBSan) and a C++11 compile check, no dependencies
+make -C test/host all        # + JSON parsers and the whole firmware (fetches the libraries once)
+make -C test/host coverage   # all of the above with line coverage of src/, fails under 90 %
 ```
 
-CI runs both, then builds the firmware, on every push and pull request.
+The firmware tests run the real `src/` (services, scenes, web pages, `main.cpp`) on a PC, with the
+real Adafruit GFX, AnimatedGIF, PNGdec and ArduinoJson libraries and small fakes of the ESP32 side in
+`test/host/fakes`: a filesystem in a temporary folder, an MQTT broker, HTTP replies, the web server,
+the setup portal and the LED panel. CI runs them all, enforces the coverage, and builds the firmware
+on every pull request.
 
 ## Previews
 
@@ -132,3 +139,5 @@ make -C tools/preview   # needs g++ and Python 3 with Pillow
 
 [docs/PORTING.md](docs/PORTING.md) has the full command table, the media layout, the online services, every
 setting, standalone mode, and each difference from the Pi version, including the original bugs that were fixed.
+
+[SECURITY.md](SECURITY.md) describes what the board protects against and its known limitations.
