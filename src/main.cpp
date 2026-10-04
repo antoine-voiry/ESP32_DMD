@@ -13,6 +13,7 @@
 #include "util/MediaLibrary.h"
 #include "util/OnlineService.h"
 #include "util/Storage.h"
+#include "core/ConfigSchema.h"
 #include "core/Media.h"
 #include "util/Settings.h"
 #include "util/TimeService.h"
@@ -118,7 +119,12 @@ void setup() {
     ESP_LOGI(TAG, "Connected to WiFi");
 
     // Initialize maxtrix panel
-    Hub75_Matrix* matrix = new Hub75_Matrix();
+    // Panel geometry from DMDRenderer.cols / rows / led_chain (applied at start-up, like the Pi).
+    const ConfigHelper& config = ConfigHelper::getInstance();
+    const dmd::PanelGeometry geometry = dmd::panelGeometry(
+        config.getSetting("DMDRenderer", "cols", ""), config.getSetting("DMDRenderer", "rows", ""),
+        config.getSetting("DMDRenderer", "led_chain", ""), dmd::PanelGeometry{PANEL_WIDTH, PANEL_HEIGHT, PANELS_NUMBER});
+    Hub75_Matrix* matrix = new Hub75_Matrix(geometry.cols, geometry.rows, geometry.chain);
     // Get configuration
     mqtt_url = ConfigHelper::getInstance().getMqttUrl();
     mqtt_topic = ConfigHelper::getInstance().getMqttPath();
@@ -161,21 +167,34 @@ void setup() {
     attract->onMessage(millis());  // arms the Running.attract_mode countdown, as RenderFirstStart() did
     messageHandler = new MessageHandler(dmdRenderer, attract, &timeService, &mediaLibrary, &onlineService);
     messageFilter = new MessageFilter();
+    // receipconf answers on the broker we are connected to (Raspydarts').
+    messageHandler->setPublisher([](const std::string& topic, const std::string& payload) {
+        return mqttClient && mqttClient->publish(topic, payload);
+    });
 
-    // Port of RenderFirstStart(): tell the user where the web interface is.
-    TextRequest address;
-    address.text = std::string("http://") + WiFi.localIP().toString().c_str();
-    address.motion = dmd::Motion::Left;
-    dmdRenderer->renderText("Web ok via", 1000);
-    dmdRenderer->renderText(address);
+    // Port of RenderFirstStart(): tell the user where the web interface is (Running.default).
+    if (settings::showWebAddress()) {
+        TextRequest address;
+        address.text = std::string("http://") + WiFi.localIP().toString().c_str();
+        address.motion = dmd::Motion::Left;
+        dmdRenderer->renderText("Web ok via", 1000);
+        dmdRenderer->renderText(address);
+    }
     // RenderFirstStart() ended on the Raspy2DMD logo.
     const std::string logo = std::string(dmd::media::kImages) + "/Raspy2DMD.png";
     if (storageExists(logo)) {
         dmdRenderer->renderImage(logo);
     }
 
+    // Port of RenderStandalone(): standalone mode starts the attract mode right away.
+    if (settings::standalone()) {
+        attract->start(settings::scrollOrder());
+    }
+
     // Initialize web server
     webServer = new LocalWebServer();
+    // The settings page re-applies what rldconf re-applies.
+    webServer->setOnSettingsSaved([]() { messageHandler->reloadSettings(); });
     webServer->begin();
 
     ESP_LOGI(TAG, "Setup completed successfully");
@@ -208,6 +227,10 @@ void loop() {
         std::vector<std::string> messages = mqttClient->unStackMessages();
         for (const auto& message : messages) {
             if (messageFilter && messageFilter->isValidMessage(message)) {
+                if (!messageHandler->accepts(message)) {
+                    ESP_LOGI(TAG, "Standalone mode, ignored: %s", message.c_str());
+                    continue;
+                }
                 attract->onMessage(millis());
                 messageHandler->handleMessage(message);
             } else {

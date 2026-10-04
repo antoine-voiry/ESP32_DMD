@@ -3,12 +3,15 @@
 
 static const char* TAG = "Hub75_Matrix";
 
-Hub75_Matrix::Hub75_Matrix() {
-    ESP_LOGI(TAG, "Creating Hub75_Matrix %dx%d, chain: %d", PANEL_WIDTH, PANEL_HEIGHT, PANELS_NUMBER);
+Hub75_Matrix::Hub75_Matrix(int cols, int rows, int chain) : _cols(cols), _rows(rows), _chain(chain) {
+    ESP_LOGI(TAG, "Creating Hub75_Matrix %dx%d, chain: %d", _cols, _rows, _chain);
+    if (_rows > 32 && E_PIN < 0) {
+        ESP_LOGE(TAG, "%d-row panels need the E address line: build with -DE_PIN=<gpio>", _rows);
+    }
 
     HUB75_I2S_CFG::i2s_pins pins = {R1_PIN, G1_PIN, B1_PIN, R2_PIN, G2_PIN, B2_PIN,
                                     A_PIN,  B_PIN,  C_PIN,  D_PIN,  E_PIN,  LAT_PIN, OE_PIN, CLK_PIN};
-    HUB75_I2S_CFG mxconfig(PANEL_WIDTH, PANEL_HEIGHT, PANELS_NUMBER, pins);
+    HUB75_I2S_CFG mxconfig(static_cast<uint16_t>(_cols), static_cast<uint16_t>(_rows), static_cast<uint16_t>(_chain), pins);
     mxconfig.driver = HUB75_I2S_CFG::FM6126A;
     // Animations redraw full frames; double buffering avoids tearing and flicker while scrolling.
     mxconfig.double_buff = true;

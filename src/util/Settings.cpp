@@ -34,7 +34,7 @@ ClockSpec clockSpec() {
     spec.lang = dmd::languageFromLocale(strSetting("ClockRenderer", "format_affichage", "fr_FR"));
     spec.fg = rgbSetting("ClockRenderer", "defaultfontcolor_clock", dmd::Rgb{0, 0, 255});
     spec.shadow = rgbSetting("ClockRenderer", "defaultfontcolor_clockshadow", dmd::Rgb{255, 0, 0});
-    spec.maxFontPx = static_cast<int>(intSetting("TextRenderer", "maxfontsize", 32));
+    spec.maxFontPx = static_cast<int>(intSetting("TextRenderer", "maxfontsize", 30));
     const std::string pattern = strSetting("ClockRenderer", "clockBackgroundImage", "OldGame.png");
     spec.pattern = pattern.empty() ? "" : std::string(dmd::media::kPatterns) + "/" + pattern;
     return spec;
@@ -50,7 +50,7 @@ TextStyle textStyle() {
     style.bg = rgbSetting("TextRenderer", "picturebackgroundcolor", dmd::Rgb{0, 0, 0});
     long maxChars = intSetting("TextRenderer", "maxcharacter", 22);
     style.maxCharsPerLine = maxChars > 0 ? static_cast<size_t>(maxChars) : 22;
-    style.maxFontPx = static_cast<int>(intSetting("TextRenderer", "maxfontsize", 32));
+    style.maxFontPx = static_cast<int>(intSetting("TextRenderer", "maxfontsize", 30));
     return style;
 }
 
@@ -75,6 +75,14 @@ dmd::OwmConfig owmConfig() {
 
 std::string scrollOrder() {
     return strSetting("Running", "scrollOrder", "1,T");
+}
+
+bool standalone() {
+    return intSetting("Running", "standalone", 0) == 1;
+}
+
+bool showWebAddress() {
+    return intSetting("Running", "default", 1) != 0;
 }
 
 uint32_t attractAfterMs() {

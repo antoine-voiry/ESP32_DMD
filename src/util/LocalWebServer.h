@@ -6,6 +6,7 @@
 #include <ArduinoJson.h>
 #include <esp_log.h>
 #include <esp_random.h>  // For secure token generation
+#include <functional>
 
 class LocalWebServer {
 private:
@@ -40,6 +41,10 @@ private:
     void handleUpload();
     void handleUploadDone();
     void handleDelete();
+    // Raspy2DMD settings (/settings): every key of core/ConfigSchema, grouped by section.
+    void handleSettings();
+    void handleSaveSettings();
+    std::function<void()> onSettingsSaved;
     File uploadFile;
     String uploadTarget;
     bool uploadFailed = false;
@@ -56,6 +61,8 @@ private:
 public:
     LocalWebServer();
     void begin();
+    // Called after /settings saved values that apply without a restart.
+    void setOnSettingsSaved(std::function<void()> callback) { onSettingsSaved = std::move(callback); }
     void handleClient();
     bool isRunning() const;
 };

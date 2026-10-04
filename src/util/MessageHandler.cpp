@@ -4,6 +4,7 @@
 
 #include "ConfigHelper.h"
 #include "Settings.h"
+#include "core/ConfigSchema.h"
 #include "Storage.h"
 #include "render/OnlineScenes.h"
 #include "core/Fx.h"
@@ -313,12 +314,7 @@ void MessageHandler::setupHandlers() {
     };
 
     // rldconf: settings are read live; re-apply the ones cached at start-up.
-    handlers["rldconf"] = [this](const std::vector<std::string>&) {
-        dmdRenderer->defaultStyle() = settings::textStyle();
-        dmdRenderer->setBrightnessPercent(ConfigHelper::getInstance().getBrightness());
-        timeService->begin(settings::timezone());
-        timeService->invalidate();
-    };
+    handlers["rldconf"] = [this](const std::vector<std::string>&) { reloadSettings(); };
 
     ////////////////////////////////////////////////////////////////////////////
     // Online data (phase 4)
@@ -345,6 +341,8 @@ void MessageHandler::setupHandlers() {
     handlers["owmzc"] = [this](const std::vector<std::string>&) { lookUpZipCode(); };
     handlers["fllcn"] = [this](const std::vector<std::string>&) { lookUpZipCode(); };
 
+    handlers["receipconf"] = [this](const std::vector<std::string>&) { sendConfig(); };
+
     handlers["sound"] = [](const std::vector<std::string>&) {
         ESP_LOGW(TAG, "'sound' ignored: the ESP32 build has no audio output");
     };
@@ -355,7 +353,6 @@ void MessageHandler::setupHandlers() {
         const char* action;
         const char* phase;
     } pending[] = {
-        {"receipconf", "phase 5, settings"},
     };
     for (const auto& p : pending) {
         const char* action = p.action;
@@ -364,6 +361,43 @@ void MessageHandler::setupHandlers() {
             notPortedYet(action, phase);
         };
     }
+}
+
+void MessageHandler::reloadSettings() {
+    dmdRenderer->defaultStyle() = settings::textStyle();
+    dmdRenderer->setCenterImages(settings::centerImages());
+    dmdRenderer->setBrightnessPercent(ConfigHelper::getInstance().getBrightness());
+    timeService->begin(settings::timezone());
+    timeService->invalidate();
+    online->invalidate();
+}
+
+bool MessageHandler::accepts(const std::string& message) const {
+    // Standalone mode: no interaction with the game beyond these commands (ServerRaspy2DMD.py).
+    if (!settings::standalone()) return true;
+    dmd::Command command;
+    return dmd::parseCommand(message, command) && dmd::allowedInStandalone(command.action);
+}
+
+void MessageHandler::sendConfig() {
+    const ConfigHelper& config = ConfigHelper::getInstance();
+    const std::vector<std::string> lines = dmd::receipconfLines([&config](const dmd::SettingDef& def) {
+        return config.getSetting(def.section, def.key, def.def);
+    });
+    const bool respond = config.getSettingInt("Running", "resptoraspydarts", 0) == 1;
+    const std::string topic = config.getSetting("Running", "raspydartscanal", "raspydarts/dmd");
+    if (!respond || !publisher) {
+        // The original only answers when Running.resptoraspydarts is 1.
+        ESP_LOGI(TAG, "receipconf: Running.resptoraspydarts is 0, not publishing %u settings",
+                 static_cast<unsigned>(lines.size()));
+        return;
+    }
+    unsigned sent = 0;
+    for (const std::string& line : lines) {
+        sent += publisher(topic, line) ? 1 : 0;
+    }
+    ESP_LOGI(TAG, "receipconf: published %u/%u settings on %s", sent, static_cast<unsigned>(lines.size()),
+             topic.c_str());
 }
 
 void MessageHandler::lookUpZipCode() {
@@ -435,6 +469,9 @@ void MessageHandler::applyConf(const std::vector<std::string>& params) {
             // Everything else is stored and read live (see util/Settings).
             config.setSetting(section, key, value);
             changed = true;
+            if (dmd::needsRestart(section, key)) {
+                restartPending = true;
+            }
             ESP_LOGI(TAG, "conf: [%s] %s = %s", section.c_str(), key.c_str(), value.c_str());
             if (section == "OpenWeatherMap") {
                 online->invalidate();
@@ -450,6 +487,13 @@ void MessageHandler::applyConf(const std::vector<std::string>& params) {
     }
     if (changed) {
         config.saveConfigFile();
+        if (restartPending) {
+            // Panel geometry and standalone mode are applied at start-up (the Pi re-created its matrix).
+            ESP_LOGW(TAG, "Restarting to apply the new panel / standalone settings");
+            dmdRenderer->clear();
+            delay(300);
+            ESP.restart();
+        }
         if (section == "TextRenderer") {
             dmdRenderer->defaultStyle() = settings::textStyle();
         }
@@ -462,6 +506,11 @@ void MessageHandler::handleMessage(const std::string& message) {
     dmd::Command command;
     if (!dmd::parseCommand(message, command)) {
         ESP_LOGW(TAG, "Malformed message: %s", message.c_str());
+        return;
+    }
+
+    if (!accepts(message)) {
+        ESP_LOGI(TAG, "Standalone mode: '%s' ignored", command.action.c_str());
         return;
     }
 
