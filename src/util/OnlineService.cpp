@@ -27,6 +27,30 @@ private:
     SemaphoreHandle_t _m;
 };
 
+// Collects a response body, refusing anything past `cap` bytes.
+class BodySink : public Stream {
+public:
+    BodySink(std::string& out, size_t cap) : _out(out), _cap(cap) { _out.clear(); }
+    size_t write(uint8_t c) override { return write(&c, 1); }
+    size_t write(const uint8_t* data, size_t size) override {
+        if (_out.size() + size > _cap) {
+            _overflowed = true;
+            return 0;
+        }
+        _out.append(reinterpret_cast<const char*>(data), size);
+        return size;
+    }
+    int available() override { return 0; }
+    int read() override { return -1; }
+    int peek() override { return -1; }
+    bool overflowed() const { return _overflowed; }
+
+private:
+    std::string& _out;
+    size_t _cap;
+    bool _overflowed = false;
+};
+
 // What a request needs, captured on the main task (settings are not thread safe).
 struct PendingRequest {
     std::string url;
@@ -176,7 +200,7 @@ bool OnlineService::httpGet(const std::string& url, std::string& body, std::stri
         error = "Pas connecte au web";
         return false;
     }
-    // No certificate pinning: the data is public and the ESP32 has no CA store configured here.
+    // No certificate check: the ESP32 has no CA store configured here (see docs/PORTING.md).
     WiFiClientSecure client;
     client.setInsecure();
     HTTPClient http;
@@ -191,13 +215,19 @@ bool OnlineService::httpGet(const std::string& url, std::string& body, std::stri
         http.end();
         return false;
     }
-    const String payload = http.getString();
+    // Read at most kMaxBodyBytes, whether the size is announced or the body is chunked.
+    BodySink sink(body, kMaxBodyBytes);
+    const bool tooBig = http.getSize() > static_cast<int>(kMaxBodyBytes);
+    const int rc = tooBig ? 0 : http.writeToStream(&sink);
     http.end();
-    if (payload.length() > kMaxBodyBytes) {
+    if (tooBig || sink.overflowed()) {
         error = "Reponse trop grande";
         return false;
     }
-    body.assign(payload.c_str(), payload.length());
+    if (rc < 0) {
+        error = "Reponse incomplete";
+        return false;
+    }
     return true;
 }
 

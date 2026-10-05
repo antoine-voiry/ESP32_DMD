@@ -7,7 +7,7 @@ Reference: Raspy2DMD 1.5.4.27 (`ServerRaspy2DMD.py`, `bin/DMDRenderer.py`, `bin/
 
 | Python (Raspberry Pi) | ESP32 |
 |---|---|
-| `on_message` + `FilterMessages` | `MQTTHelper` (FIFO queue) + `MessageFilter` → `core/Protocol` |
+| `on_message` + `FilterMessages` | `MQTTHelper` (bounded FIFO queue) + `core/Protocol` |
 | `UnstackMessages` dispatcher | `MessageHandler` |
 | `RenderText` and friends, one thread each | `DMDRenderer` queues `Scene`s on `core/SceneRunner`, advanced from `loop()` |
 | `Stop()` / `_stopAffichage` flags | `SceneRunner::interrupt()` |
@@ -16,7 +16,8 @@ Reference: Raspy2DMD 1.5.4.27 (`ServerRaspy2DMD.py`, `bin/DMDRenderer.py`, `bin/
 | `DMDRenderer_SpecialsMoves` | `core/SpecialMoves` |
 
 `src/core` has no Arduino dependency and is unit tested on the host: `make -C test/host`.
-The JSON parsers in `src/net` are tested with ArduinoJson: `make -C test/host json ARDUINOJSON=<ArduinoJson>/src` (CI does this).
+The rest of the firmware is tested on the host too, against fakes of the ESP32 libraries:
+`make -C test/host all`, and `make -C test/host coverage` for line coverage (CI requires 90 %).
 
 ## Commands
 

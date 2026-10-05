@@ -1,172 +1,81 @@
-#include <Arduino.h>
-
 #include "WifiManagerHelper.h"
 
-static const char* TAG = "WiFiManager";
+#include <Arduino.h>
+#include <WiFi.h>
+#include <WiFiManager.h>
+#include <esp_log.h>
+#include <esp_random.h>
+#include <esp_wifi.h>
 
-// Define the portal name
-#define PORTAL_NAME "DMD_CONFIG_WIFI"
-#define MQTT_URL_ID "mqtt_url"
-#define MQTT_URL_LABEL "MQTT URL"
-#define MQTT_URL_LENGTH 255
+#include "ConfigHelper.h"
 
-#define MQTT_PATH_ID "mqtt_path"
-#define MQTT_PATH_LABEL "MQTT Path"
-#define MQTT_PATH_LENGTH 255
+static const char* TAG = "WiFi";
 
-#define HOSTNAME_ID "hostname"
-#define HOSTNAME_LABEL "Hostname"
-#define HOSTNAME_LENGTH 255
+namespace {
 
-// Save Config in JSON format
-void WifiManagerHelper::saveConfigFile() {
-    ESP_LOGI(TAG, "saveConfigFile - Saving config file");
-    ConfigHelper::getInstance().saveConfigFile();
+constexpr int kFieldLength = 255;
+constexpr unsigned kPortalTimeoutSec = 600;
+
+void onWiFiEvent(WiFiEvent_t event) {
+    if (event == ARDUINO_EVENT_WIFI_STA_GOT_IP) {
+        ESP_LOGI(TAG, "Connected, IP %s", WiFi.localIP().toString().c_str());
+    } else if (event == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
+        ESP_LOGW(TAG, "Connection lost, reconnecting");
+        WiFi.reconnect();
+    }
 }
- 
-// Callback notifying us of the need to save configuration
-void WifiManagerHelper::saveConfigCallback() {
-    _callbackRegistered = true;  // Set flag to verify callback was called
-    ESP_LOGI(TAG, "saveConfigCallback triggered");
-    ESP_LOGD(TAG, "Previous _shouldSaveConfig value: %d", _shouldSaveConfig);
-    _shouldSaveConfig = true;
-    ESP_LOGD(TAG, "New _shouldSaveConfig value: %d", _shouldSaveConfig);
+
+}  // namespace
+
+std::string WifiManagerHelper::newPortalPassword() {
+    static const char kAlphabet[] = "abcdefghjkmnpqrstuvwxyz23456789";
+    std::string password;
+    for (int i = 0; i < 10; ++i) {
+        password += kAlphabet[esp_random() % (sizeof(kAlphabet) - 1)];
+    }
+    return password;
 }
-// Called when config mode launched
-void WifiManagerHelper::configModeCallback(WiFiManager *myWiFiManager) {
-    ESP_LOGI(TAG, "Entered Configuration Mode");
-    ESP_LOGI(TAG, "Config SSID: %s, IP Address: %s", 
-        myWiFiManager->getConfigPortalSSID().c_str(), 
-        WiFi.softAPIP().toString().c_str());
-}
-void WifiManagerHelper::applydefaultWifiSettings() {
-    // Configure WiFi for stability
-    WiFi.persistent(true);
-    WiFi.setAutoReconnect(true);   
-    // Set power saving to WIFI_PS_NONE for better stability
-    esp_wifi_set_ps(WIFI_PS_NONE);
-    // Increase WiFi Tx power
-    esp_wifi_set_max_tx_power(78);  // Maximum Tx power (in dBm)    
-    WiFi.mode(WIFI_STA); // explicitly set mode, esp defaults to STA+AP
-    // Register WiFi event handler
-    WiFi.onEvent(WiFiEvent);
-}
-void WifiManagerHelper::setWMUp(boolean forceConfig, char* hostname) {
+
+void WifiManagerHelper::connect(bool forcePortal, const PortalNotice& notice) {
+    ConfigHelper& config = ConfigHelper::getInstance();
+    WiFi.mode(WIFI_STA);
+    WiFi.setAutoReconnect(true);
+    esp_wifi_set_ps(WIFI_PS_NONE);  // power saving adds latency to MQTT messages
+    WiFi.onEvent(onWiFiEvent);
+
     WiFiManager wm;
-    std::string mqtt_url_str;
-    std::string mqtt_path_str;
-    std::string host;
-
-    // Apply default WiFi settings first
-    applydefaultWifiSettings();
-
-    // Load existing configuration
-    if(ConfigHelper::getInstance().isConfigLoaded() && !forceConfig) {
-        mqtt_url_str = ConfigHelper::getInstance().getMqttUrl();
-        mqtt_path_str = ConfigHelper::getInstance().getMqttPath();
-        host = ConfigHelper::getInstance().getHostname();
-        
-        // Set hostname if it's not empty
-        if (!host.empty()) {
-            ESP_LOGI(TAG, "Setting hostname to: %s", host.c_str());
-            wm.setHostname(host.c_str());
-            WiFi.setHostname(host.c_str());
-        } else {
-            ESP_LOGW(TAG, "Hostname is empty, using default");
-        }
-
-        // Try to connect with existing configuration
-        ESP_LOGI(TAG, "Attempting to connect with saved configuration");
-        if (wm.autoConnect("AutoConnectAP")) {
-            ESP_LOGI(TAG, "Connected to WiFi using saved configuration");
-            return;
-        }
-        // If autoConnect fails, fall through to configuration portal
-        ESP_LOGW(TAG, "Failed to connect with saved configuration, starting config portal");
-        forceConfig = true;
+    if (!config.getHostname().empty()) {
+        wm.setHostname(config.getHostname().c_str());
+    }
+    // Without this, a failed autoConnect() would open an unprotected access point.
+    wm.setEnableConfigPortal(false);
+    if (!forcePortal && wm.autoConnect()) {
+        return;
     }
 
-    // Configuration portal needed
-    if (forceConfig) {
-        // Set callbacks before doing anything else
-        wm.setAPCallback(std::bind(&WifiManagerHelper::configModeCallback, this, std::placeholders::_1));
-        wm.setSaveConfigCallback(std::bind(&WifiManagerHelper::saveConfigCallback, this));
-
-        // Get current values for the config portal with validation
-        mqtt_url_str = ConfigHelper::getInstance().getMqttUrl();
-        mqtt_path_str = ConfigHelper::getInstance().getMqttPath();
-        host = ConfigHelper::getInstance().getHostname();
-
-        // Provide default values if empty or invalid
-        if (mqtt_url_str.empty()) mqtt_url_str = "";
-        if (mqtt_path_str.empty()) mqtt_path_str = "";
-        if (host.empty()) host = "";
-
-
-
-        // Create parameters
-        WiFiManagerParameter mqtt_url_box(MQTT_URL_ID, MQTT_URL_LABEL, 
-            mqtt_url_str.c_str(), MQTT_URL_LENGTH);
-        WiFiManagerParameter mqtt_path_box(MQTT_PATH_ID, MQTT_PATH_LABEL, 
-            mqtt_path_str.c_str(), MQTT_PATH_LENGTH);
-        WiFiManagerParameter hostname_box(HOSTNAME_ID, HOSTNAME_LABEL, 
-            host.c_str(), HOSTNAME_LENGTH);
-
-        // Add parameters to WiFiManager
-        wm.addParameter(&mqtt_url_box);
-        wm.addParameter(&mqtt_path_box);
-        wm.addParameter(&hostname_box);
-
-        // Configure portal behavior
-        wm.setConfigPortalBlocking(true);
-        wm.setBreakAfterConfig(true);
-
-        // Start the portal
-        ESP_LOGI(TAG, "Starting config portal");
-        if (!wm.startConfigPortal(PORTAL_NAME, "12345678")) {
-            ESP_LOGE(TAG, "Failed to connect or configure");
-            delay(3000);
-            ESP.restart();
-        }
-
-        // If we get here, the portal was successful
-        if (_shouldSaveConfig) {
-            // Only update config if the callback was triggered
-            ESP_LOGI(TAG, "New configuration provided, saving...");
-            ConfigHelper::getInstance().setMqttUrl(mqtt_url_box.getValue());
-            ConfigHelper::getInstance().setMqttPath(mqtt_path_box.getValue());
-            ConfigHelper::getInstance().setHostname(hostname_box.getValue());
-            saveConfigFile();
-            
-            // Update current values
-            mqtt_url_str = mqtt_url_box.getValue();
-            mqtt_path_str = mqtt_path_box.getValue();
-            host = hostname_box.getValue();
-        }
-    }
-
-    // At this point we should be connected
-    if (WiFi.status() == WL_CONNECTED) {
-        ESP_LOGI(TAG, "WiFi connected, IP: %s", WiFi.localIP().toString().c_str());
-        ESP_LOGI(TAG, "MQTT URL: %s, Path: %s, Hostname: %s", 
-            mqtt_url_str.c_str(), mqtt_path_str.c_str(), host.c_str());
-        
-    } else {
-        ESP_LOGE(TAG, "Failed to connect to WiFi");
-        delay(3000);
+    const std::string password = newPortalPassword();
+    WiFiManagerParameter mqttUrl("mqtt_url", "MQTT broker", config.getMqttUrl().c_str(), kFieldLength);
+    WiFiManagerParameter mqttPath("mqtt_path", "MQTT topic", config.getMqttPath().c_str(), kFieldLength);
+    WiFiManagerParameter hostname("hostname", "Hostname", config.getHostname().c_str(), kFieldLength);
+    wm.addParameter(&mqttUrl);
+    wm.addParameter(&mqttPath);
+    wm.addParameter(&hostname);
+    wm.setSaveConfigCallback([this]() { _saveRequested = true; });
+    wm.setAPCallback([&](WiFiManager*) {
+        ESP_LOGW(TAG, "Setup portal open: join '%s' with password '%s'", kPortalName, password.c_str());
+        if (notice) notice(kPortalName, password);
+    });
+    wm.setConfigPortalTimeout(kPortalTimeoutSec);
+    if (!wm.startConfigPortal(kPortalName, password.c_str())) {
+        ESP_LOGE(TAG, "Setup portal closed without a connection, restarting");
+        delay(1000);
         ESP.restart();
+        return;
     }
-}
-
-void WifiManagerHelper::WiFiEvent(WiFiEvent_t event) {
-    ESP_LOGD(TAG, "[WiFi-event] event: %d", event);
-    switch(event) {
-        case SYSTEM_EVENT_STA_GOT_IP:
-            ESP_LOGI(TAG, "WiFi connected, IP: %s", WiFi.localIP().toString().c_str());
-            break;
-        case SYSTEM_EVENT_STA_DISCONNECTED:
-            ESP_LOGW(TAG, "WiFi lost connection");
-            WiFi.reconnect();
-            break;
+    if (_saveRequested) {
+        config.setMqttUrl(mqttUrl.getValue());
+        config.setMqttPath(mqttPath.getValue());
+        config.setHostname(hostname.getValue());
+        config.saveConfigFile();
     }
 }

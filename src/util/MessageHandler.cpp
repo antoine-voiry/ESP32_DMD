@@ -17,7 +17,6 @@ static const char* TAG = "MessageHandler";
 MessageHandler::MessageHandler(DMDRenderer* renderer, AttractController* attract, TimeService* timeService,
                                MediaLibrary* media, OnlineService* online)
     : dmdRenderer(renderer), attract(attract), timeService(timeService), media(media), online(online) {
-    ESP_LOGI(TAG, "Initializing MessageHandler");
     setupHandlers();
 }
 
@@ -35,10 +34,6 @@ uint32_t MessageHandler::holdArg(const std::vector<std::string>& params, size_t 
     }
     long seconds = dmd::parseIntArg(params[i], 0);
     return seconds > 0 ? static_cast<uint32_t>(seconds) * 1000u : 0;
-}
-
-void MessageHandler::notPortedYet(const char* action, const char* phase) {
-    ESP_LOGW(TAG, "'%s' is not ported to the ESP32 yet (%s)", action, phase);
 }
 
 void MessageHandler::setupHandlers() {
@@ -137,7 +132,7 @@ void MessageHandler::setupHandlers() {
     };
 
     ////////////////////////////////////////////////////////////////////////////
-    // GIFs and images (phase 3)
+    // GIFs and images
 
     // gif|Gifs/Gif.gif|2
     handlers["gif"] = [this](const std::vector<std::string>& params) {
@@ -267,7 +262,7 @@ void MessageHandler::setupHandlers() {
     };
 
     ////////////////////////////////////////////////////////////////////////////
-    // Clock, attract mode and carousel (phase 2)
+    // Clock, attract mode and carousel
 
     // time|start or time|stop (an optional 2nd argument is ignored, as it was by RunTime())
     handlers["time"] = [this](const std::vector<std::string>& params) {
@@ -317,7 +312,7 @@ void MessageHandler::setupHandlers() {
     handlers["rldconf"] = [this](const std::vector<std::string>&) { reloadSettings(); };
 
     ////////////////////////////////////////////////////////////////////////////
-    // Online data (phase 4)
+    // Online data
 
     handlers["meteo"] = [this](const std::vector<std::string>&) {
         dmdRenderer->renderScene(std::unique_ptr<dmd::Scene>(new CurrentWeatherScene(
@@ -346,21 +341,6 @@ void MessageHandler::setupHandlers() {
     handlers["sound"] = [](const std::vector<std::string>&) {
         ESP_LOGW(TAG, "'sound' ignored: the ESP32 build has no audio output");
     };
-
-    ////////////////////////////////////////////////////////////////////////////
-    // Not ported yet
-    const struct {
-        const char* action;
-        const char* phase;
-    } pending[] = {
-    };
-    for (const auto& p : pending) {
-        const char* action = p.action;
-        const char* phase = p.phase;
-        handlers[action] = [this, action, phase](const std::vector<std::string>&) {
-            notPortedYet(action, phase);
-        };
-    }
 }
 
 void MessageHandler::reloadSettings() {

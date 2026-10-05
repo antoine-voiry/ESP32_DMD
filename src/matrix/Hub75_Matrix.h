@@ -68,8 +68,6 @@ public:
     // 0..100 %, as Raspy2DMD's "brightness" setting.
     void setBrightnessPercent(int percent);
 
-    MatrixPanel_I2S_DMA* getMatrixPanel() { return _matrix; }
-
 private:
     MatrixPanel_I2S_DMA* _matrix = nullptr;
     int _cols;

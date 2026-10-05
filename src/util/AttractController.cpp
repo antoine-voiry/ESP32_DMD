@@ -150,7 +150,7 @@ bool AttractController::playCarousel() {
         return false;
     }
     if (!entry.gifBackground.empty()) {
-        ESP_LOGW(TAG, "%s: GIF background '%s' needs media support (phase 3), showing text only",
+        ESP_LOGW(TAG, "%s: GIF backgrounds are not supported for carousel texts, ignoring '%s'",
                  path.c_str(), entry.gifBackground.c_str());
     }
     TextRequest request;

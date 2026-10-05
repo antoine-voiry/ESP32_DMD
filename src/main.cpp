@@ -1,48 +1,42 @@
 #include <Arduino.h>
+#include <ESPmDNS.h>
 #include <WiFi.h>
 #include <esp_log.h>
-#include <ESPmDNS.h>  
-#include "util/WifiManagerHelper.h"
-#include "util/ConfigHelper.h"
-#include "util/MQTTHelper.h"
-#include "util/DMDRenderer.h"
-#include "util/MessageHandler.h"
-#include "util/MessageFilter.h"
-#include "util/LocalWebServer.h"
-#include "util/AttractController.h"
-#include "util/MediaLibrary.h"
-#include "util/OnlineService.h"
-#include "util/Storage.h"
+
 #include "core/ConfigSchema.h"
 #include "core/Media.h"
-#include "util/Settings.h"
-#include "util/TimeService.h"
+#include "core/Protocol.h"
 #include "matrix/Hub75_Matrix.h"
-static const char* TAG = "Main";  // Add this line for ESP_LOG tag
-static unsigned long lastLog = 0;  // Move outside loop() to preserve value
-static const int LOG_ALIVE_INTERVAL = 5000; // Maximum number of messages to process at once
+#include "util/AttractController.h"
+#include "util/ConfigHelper.h"
+#include "util/DMDRenderer.h"
+#include "util/LocalWebServer.h"
+#include "util/MQTTHelper.h"
+#include "util/MediaLibrary.h"
+#include "util/MessageHandler.h"
+#include "util/OnlineService.h"
+#include "util/Settings.h"
+#include "util/Storage.h"
+#include "util/TimeService.h"
+#include "util/WifiManagerHelper.h"
 
-std::string  mqtt_url = "raspydarts.local"; // Replace with your MQTT broker address
-std::string  mqtt_topic = "raspydarts/#";
-std::string  mqtt_client_id = "esp32_client";
-WifiManagerHelper *  wifiHelper = nullptr; 
-DMDRenderer * dmdRenderer = nullptr; 
-MessageHandler* messageHandler = nullptr; 
-MessageFilter* messageFilter = nullptr; 
-// Define the static member variable
+static const char* TAG = "Main";
 
-MQTTHelper* mqttClient= nullptr; 
-TimeService timeService;
-MediaLibrary mediaLibrary;
-OnlineService onlineService;
-AttractController* attract = nullptr;
-LocalWebServer* webServer = nullptr;
-static dmd::PanelGeometry panel = {64, 32, 1};
+static DMDRenderer* dmdRenderer = nullptr;
+static MessageHandler* messageHandler = nullptr;
+static MQTTHelper* mqttClient = nullptr;
+static AttractController* attract = nullptr;
+static LocalWebServer* webServer = nullptr;
+static TimeService timeService;
+static MediaLibrary mediaLibrary;
+static OnlineService onlineService;
+static dmd::PanelGeometry panel = {PANEL_WIDTH, PANEL_HEIGHT, PANELS_NUMBER};
+static std::string mqttBroker;
 static int mqttWasConnected = -1;  // unknown until the first check
 
 // One path for every command, whether it came from MQTT or the web page's "Send" box.
 static bool dispatchMessage(const std::string& message) {
-    if (!messageFilter || !messageFilter->isValidMessage(message)) {
+    if (!dmd::isAcceptedPayload(message)) {
         ESP_LOGW(TAG, "Invalid message: %s", message.c_str());
         return false;
     }
@@ -62,14 +56,14 @@ static std::string formatUptime(unsigned long ms) {
     return buf;
 }
 
-static std::vector<std::pair<std::string, std::string>> boardStatus() {
+static LocalWebServer::Status boardStatus() {
     const size_t total = LittleFS.totalBytes(), used = LittleFS.usedBytes();
     return {
         {"Hostname", WiFi.getHostname()},
         {"IP", WiFi.localIP().toString().c_str()},
         {"Wi-Fi", std::to_string(WiFi.RSSI()) + " dBm"},
-        {"MQTT", mqtt_url + " (" + (mqttWasConnected == 1 ? "connected" : "offline") + ")"},
-        {"Topic", mqtt_topic},
+        {"MQTT", mqttBroker + (mqttWasConnected == 1 ? " (connected)" : " (offline)")},
+        {"Topic", ConfigHelper::getInstance().getMqttPath()},
         {"Panel", std::to_string(panel.width()) + " x " + std::to_string(panel.rows)},
         {"Uptime", formatUptime(millis())},
         {"Free heap", std::to_string(ESP.getFreeHeap() / 1024) + " KB"},
@@ -77,125 +71,51 @@ static std::vector<std::pair<std::string, std::string>> boardStatus() {
     };
 }
 
-void initLogging() {
-    Serial.begin(115200);
-    delay(100);
-    // Set log level before any logging happens
-    esp_log_level_set("*", ESP_LOG_INFO); // Show all logs initially
-    esp_log_level_set("wifi", ESP_LOG_DEBUG); // Less verbose WiFi Logs
-    esp_log_level_set(TAG, ESP_LOG_DEBUG);   // Debug level for main module
-    esp_log_level_set("MQTTHelper*", ESP_LOG_INFO);// increase MQTT logs to debug
-    esp_log_level_set("MQTTHelper", ESP_LOG_INFO);// increase MQTT logs to debug
-
-    // Test logging
-    ESP_LOGE(TAG, "Error level test");
-    ESP_LOGW(TAG, "Warning level test");
-    ESP_LOGI(TAG, "Info level test");
-    ESP_LOGD(TAG, "Debug level test");
-    ESP_LOGV(TAG, "Verbose level test");
-        
-}
-
-bool resolveHostname(const std::string& hostname, IPAddress& resolvedIP) {
-    // Wait a bit after WiFi connection before attempting mDNS
-    delay(250);
-    
-    ESP_LOGI(TAG, "Attempting to resolve %s via mDNS...", hostname.c_str());
-    // check first, if the hostname is already an IP address using ipaddress.ip_address(host_string)
-    IPAddress testIP;
-    if (testIP.fromString(hostname.c_str())) {
-        resolvedIP = testIP;
-        ESP_LOGI(TAG, "Hostname is already an IP address: %s", resolvedIP.toString().c_str());
-        return true;
+// PubSubClient cannot resolve "raspydarts.local" by itself: ask mDNS for .local names.
+static std::string resolveBroker(const std::string& host) {
+    IPAddress ip;
+    if (host.empty() || ip.fromString(host.c_str())) {
+        return host;
     }
-
-    // Initialize mDNS if not already done
-    if (!MDNS.begin("ESP32")) {
-        ESP_LOGE(TAG, "Error setting up mDNS responder");
-        return false;
-    }
-
-    // Try mDNS resolution with multiple attempts
-    for (int i = 0; i < 3; i++) {
-        resolvedIP = MDNS.queryHost(hostname.c_str(), 5000);
-        if (resolvedIP != INADDR_NONE) {
-            ESP_LOGI(TAG, "Resolved %s to %s", hostname.c_str(), resolvedIP.toString().c_str());
-            return true;
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        const std::string name = host.size() > 6 && host.compare(host.size() - 6, 6, ".local") == 0
+                                     ? host.substr(0, host.size() - 6)
+                                     : host;
+        ip = MDNS.queryHost(name.c_str(), 2000);
+        if (ip != INADDR_NONE) {
+            ESP_LOGI(TAG, "%s is %s", host.c_str(), ip.toString().c_str());
+            return ip.toString().c_str();
         }
-        ESP_LOGW(TAG, "mDNS resolution attempt %d failed, retrying...", i + 1);
-        delay(1000);
     }
-    ESP_LOGE(TAG, "mDNS resolution failed");
-    return false;
+    ESP_LOGW(TAG, "Cannot resolve %s with mDNS, trying DNS", host.c_str());
+    return host;
 }
 
-boolean validateMQTTTReachable(const std::string& hostname, int port) {
-    WiFiClient& client = wifiHelper->getWIFIClient();
-    if (client.connect(hostname.c_str(), port)) {
-        ESP_LOGI(TAG, "Network reachable: %s:%d", hostname.c_str(), port);
-        client.stop();
-        return true;
-    } else {
-        ESP_LOGE(TAG, "Network unreachable: %s:%d", hostname.c_str(), port);
-        return false;
-    }
-}
-
-/**
- * setup function
- * This function is called once at the beginning of the program.
- */
 void setup() {
-    // Initialize serial communication
-    initLogging();
-    
-    bool forceConfig = !ConfigHelper::getInstance().loadConfigFile();
-    ESP_LOGI(TAG, "Config file loaded: %s", forceConfig ? "No" : "Yes");
-    
-    // Initialize WiFi
-    wifiHelper = new WifiManagerHelper();
-    wifiHelper->setWMUp(forceConfig, const_cast<char*>(""));
-    ESP_LOGI(TAG, "Connected to WiFi");
+    Serial.begin(115200);
+    ConfigHelper& config = ConfigHelper::getInstance();
+    const bool configured = config.loadConfigFile();
 
-    // Initialize maxtrix panel
     // Panel geometry from DMDRenderer.cols / rows / led_chain (applied at start-up, like the Pi).
-    const ConfigHelper& config = ConfigHelper::getInstance();
-    const dmd::PanelGeometry geometry = panel = dmd::panelGeometry(
-        config.getSetting("DMDRenderer", "cols", ""), config.getSetting("DMDRenderer", "rows", ""),
-        config.getSetting("DMDRenderer", "led_chain", ""), dmd::PanelGeometry{PANEL_WIDTH, PANEL_HEIGHT, PANELS_NUMBER});
-    Hub75_Matrix* matrix = new Hub75_Matrix(geometry.cols, geometry.rows, geometry.chain);
-    // Get configuration
-    mqtt_url = ConfigHelper::getInstance().getMqttUrl();
-    mqtt_topic = ConfigHelper::getInstance().getMqttPath();
-    mqtt_client_id = std::string(WiFi.getHostname());
-
-    // Resolve MQTT broker address
-    IPAddress resolvedIP;
-    if (!mqtt_url.empty()) {
-        if (!resolveHostname(mqtt_url, resolvedIP)) {
-            ESP_LOGE(TAG, "Failed to resolve hostname: %s", mqtt_url.c_str());
-        } else {
-            ESP_LOGE(TAG, "Resolved hostname: %s", mqtt_url.c_str());
-            mqtt_url = resolvedIP.toString().c_str();
-        }
-    }
-
-    if (!validateMQTTTReachable(mqtt_url, 1883)) {
-        ESP_LOGE(TAG, "Network unreachable for MQTT broker: %s", mqtt_url.c_str());
-    } else {
-        ESP_LOGI(TAG, "Network reachable for MQTT broker: %s", mqtt_url.c_str());
-    }
-
-    ESP_LOGI(TAG, "MQTT Config - URL: %s, Path: %s, Client ID: %s", 
-             mqtt_url.c_str(), mqtt_topic.c_str(), mqtt_client_id.c_str());
-
-    // Initialize MQTT client
-    mqttClient = new MQTTHelper(mqtt_url, mqtt_client_id, mqtt_topic);
-    
-    // Initialize other components
-    dmdRenderer = new DMDRenderer(matrix);
-    dmdRenderer->setBrightnessPercent(ConfigHelper::getInstance().getBrightness());
+    panel = dmd::panelGeometry(config.getSetting("DMDRenderer", "cols", ""),
+                               config.getSetting("DMDRenderer", "rows", ""),
+                               config.getSetting("DMDRenderer", "led_chain", ""), panel);
+    dmdRenderer = new DMDRenderer(new Hub75_Matrix(panel.cols, panel.rows, panel.chain));
+    dmdRenderer->setBrightnessPercent(config.getBrightness());
     dmdRenderer->defaultStyle() = settings::textStyle();
+
+    WifiManagerHelper().connect(!configured, [](const std::string& ssid, const std::string& password) {
+        dmdRenderer->renderText("WiFi " + ssid + " " + password);
+        dmdRenderer->update();
+    });
+
+    const std::string hostname = config.getHostname().empty() ? "esp32-dmd" : config.getHostname();
+    if (MDNS.begin(hostname.c_str())) {
+        MDNS.addService("http", "tcp", 80);
+    }
+    mqttBroker = resolveBroker(config.getMqttUrl());
+    mqttClient = new MQTTHelper(mqttBroker, WiFi.getHostname(), config.getMqttPath());
+
     storageBegin();
     mediaLibrary.begin();
     dmdRenderer->setMediaLibrary(&mediaLibrary);
@@ -205,10 +125,9 @@ void setup() {
     attract = new AttractController(dmdRenderer, &mediaLibrary, &onlineService);
     attract->onMessage(millis());  // arms the Running.attract_mode countdown, as RenderFirstStart() did
     messageHandler = new MessageHandler(dmdRenderer, attract, &timeService, &mediaLibrary, &onlineService);
-    messageFilter = new MessageFilter();
     // receipconf answers on the broker we are connected to (Raspydarts').
     messageHandler->setPublisher([](const std::string& topic, const std::string& payload) {
-        return mqttClient && mqttClient->publish(topic, payload);
+        return mqttClient->publish(topic, payload);
     });
 
     // Port of RenderFirstStart(): tell the user where the web interface is (Running.default).
@@ -224,76 +143,39 @@ void setup() {
     if (storageExists(logo)) {
         dmdRenderer->renderImage(logo);
     }
-
     // Port of RenderStandalone(): standalone mode starts the attract mode right away.
     if (settings::standalone()) {
         attract->start(settings::scrollOrder());
     }
 
-    // Initialize web server
     webServer = new LocalWebServer();
+    webServer->setHostname(hostname);
     // The settings page re-applies what rldconf re-applies.
     webServer->setOnSettingsSaved([]() { messageHandler->reloadSettings(); });
     webServer->setOnCommand(dispatchMessage);
     webServer->setStatusProvider(boardStatus);
     webServer->begin();
-
-    ESP_LOGI(TAG, "Setup completed successfully");
 }
 
-
-
 void loop() {
-    unsigned long now = millis();
+    webServer->handleClient();
 
-    // Only log every second
-    if (now - lastLog >= LOG_ALIVE_INTERVAL) {
-        ESP_LOGI(TAG, "Loop iteration to show this is alive");
-        lastLog = now;
-    }
-
-    // Handle web server requests
-    if (webServer && webServer->isRunning()) {
-        webServer->handleClient();
-    }
-
-    // Handle MQTT messages
-    if (mqttClient && mqttClient->handleConnect()) {
+    if (mqttClient->loop(millis())) {
         if (mqttWasConnected != 1) {
-            ESP_LOGI(TAG, "MQTT client connected");
+            ESP_LOGI(TAG, "MQTT connected");
             mqttWasConnected = 1;
         }
-        mqttClient->loop();
-        std::vector<std::string> messages = mqttClient->unStackMessages();
-        for (const auto& message : messages) {
+        for (const std::string& message : mqttClient->takeMessages()) {
             dispatchMessage(message);
         }
     } else if (mqttWasConnected != 0) {
         // Report the state change once instead of redrawing it on every loop.
-        ESP_LOGE(TAG, "MQTT client not connected");
         dmdRenderer->renderStatus("MQTT not connected");
         mqttWasConnected = 0;
     }
     attract->loop(millis());
     timeService.loop(millis(), *dmdRenderer);
-    dmdRenderer->update(); // Advance the current animation
+    dmdRenderer->update();
     // Yield to the idle task; animations need a fast loop (scroll frames are 10 ms apart).
     delay(1);
 }
-
-void cleanup() {
-    delete webServer;
-    delete mqttClient;
-    delete dmdRenderer;
-    delete messageHandler;
-    delete messageFilter;
-    delete wifiHelper;
-
-    webServer = nullptr;
-    mqttClient = nullptr;
-    dmdRenderer = nullptr;
-    messageHandler = nullptr;
-    messageFilter = nullptr;
-    wifiHelper = nullptr;
-}
-

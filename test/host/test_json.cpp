@@ -4,19 +4,10 @@
 #include <string>
 #include <vector>
 
+#include "check.h"
 #include "net/OnlineJson.h"
 
-static int g_failures = 0;
-static int g_checks = 0;
-
-#define CHECK(cond)                                                              \
-    do {                                                                         \
-        ++g_checks;                                                              \
-        if (!(cond)) {                                                           \
-            ++g_failures;                                                        \
-            std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);          \
-        }                                                                        \
-    } while (0)
+TEST_MAIN_COUNTERS;
 
 using namespace dmd;
 
@@ -69,6 +60,5 @@ int main() {
     CHECK(days[1].date == "2026-10-04");
     CHECK(!parseTempo("[]", 2, days));
 
-    std::printf("%d checks, %d failures\n", g_checks, g_failures);
-    return g_failures == 0 ? 0 : 1;
+    return TEST_REPORT();
 }

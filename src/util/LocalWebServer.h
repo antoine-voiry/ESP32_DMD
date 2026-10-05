@@ -1,85 +1,71 @@
 #ifndef LOCALWEBSERVER_H
 #define LOCALWEBSERVER_H
 
+// The board's web pages: dashboard (/), Raspy2DMD settings (/settings), media files (/files) and
+// the portal values (/config). Requests from other sites are refused (see core/WebGuard.h).
+
 #include <WebServer.h>
-#include "Storage.h"
-#include <ArduinoJson.h>
-#include <esp_log.h>
-#include <esp_random.h>  // For secure token generation
+
 #include <functional>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "Storage.h"
+
 class LocalWebServer {
+public:
+    using Status = std::vector<std::pair<std::string, std::string>>;
+
+    LocalWebServer();
+    void begin();
+    // Serves pending requests while Wi-Fi is connected.
+    void handleClient();
+
+    // The name the board answers to besides its IP address (also with a domain: hostname.local...).
+    void setHostname(const std::string& hostname) { _hostname = hostname; }
+    // Called after /settings saved values that apply without a restart.
+    void setOnSettingsSaved(std::function<void()> callback) { _onSettingsSaved = std::move(callback); }
+    // "Send to the panel": handled like an MQTT payload, returns false if rejected.
+    void setOnCommand(std::function<bool(const std::string&)> callback) { _onCommand = std::move(callback); }
+    // Key/value lines for the dashboard's status card.
+    void setStatusProvider(std::function<Status()> provider) { _statusProvider = std::move(provider); }
+
 private:
-    // Server instance
-    WebServer server;
-    
-    // Configuration constants
-    static constexpr const char* CONFIG_FILE = "/config.json";
-    static constexpr int JSON_CAPACITY = 1024;
-    static constexpr uint16_t SERVER_PORT = 80;
-    
-    // Security settings
-    static constexpr const char* SECURITY_HEADER = "X-Security-Token";
-    static constexpr unsigned long TOKEN_VALIDITY = 3600000;  // 1 hour in ms
-    String securityToken;
-    unsigned long tokenTimestamp;
-    
-    // Rate limiting
-    static constexpr unsigned long RATE_LIMIT_WINDOW = 60000;  // 1 minute
-    static constexpr int MAX_REQUESTS = 30;  // Maximum requests per window
-    unsigned long requestCounts[30];  // Circular buffer for request timestamps
-    int requestIndex;
-    
-    // Handler methods
+    // Registers a route behind the Host / Origin checks.
+    void route(const char* path, HTTPMethod method, void (LocalWebServer::*handler)());
+    // 0 when the request may proceed, else the HTTP status to refuse it with (403, 429).
+    int refusal(bool post);
+    bool requestAllowed(bool post);
+    bool checkRateLimit();
+    void redirect(const char* location);
+    String page(const char* title, const char* active, const String& body) const;
+
     void handleRoot();
+    void handleSend();
     void handleConfig();
-    void handleGetConfigJson();
     void handleSaveConfig();
-    void handleNotFound();
-    // Media file manager (/files): list, upload into a folder, delete.
     void handleFiles();
     void handleUpload();
     void handleUploadDone();
     void handleDelete();
-    // Raspy2DMD settings (/settings): every key of core/ConfigSchema, grouped by section.
     void handleSettings();
     void handleSaveSettings();
-    void handleSend();
-    std::function<void()> onSettingsSaved;
-    std::function<bool(const std::string&)> onCommand;
-    std::function<std::vector<std::pair<std::string, std::string>>()> statusProvider;
 
-    // Shared look: dark theme, header with navigation (`active` = current path).
-    String page(const char* title, const char* active, const String& body) const;
-    File uploadFile;
-    String uploadTarget;
-    bool uploadFailed = false;
-    
-    // Utility methods
-    String generateConfigForm(const String& jsonString);
-    bool saveConfigToFile(DynamicJsonDocument& doc);
-    String readConfigFile();
-    bool checkSecurityToken(void);
-    void generateSecurityToken(void);
-    bool checkRateLimit(void);
-    void logAccess(const String& path, int responseCode);
+    static constexpr unsigned long kRateWindowMs = 60000;
+    static constexpr int kMaxRequestsPerWindow = 30;
 
-public:
-    LocalWebServer();
-    void begin();
-    // Called after /settings saved values that apply without a restart.
-    void setOnSettingsSaved(std::function<void()> callback) { onSettingsSaved = std::move(callback); }
-    // "Send to the panel" on the home page: handled like an MQTT payload, returns false if rejected.
-    void setOnCommand(std::function<bool(const std::string&)> callback) { onCommand = std::move(callback); }
-    // Key/value lines for the home page status card.
-    void setStatusProvider(std::function<std::vector<std::pair<std::string, std::string>>()> provider) {
-        statusProvider = std::move(provider);
-    }
-    void handleClient();
-    bool isRunning() const;
+    WebServer _server;
+    std::string _hostname;
+    unsigned long _requestTimes[kMaxRequestsPerWindow] = {};
+    int _requestIndex = 0;
+    File _uploadFile;
+    std::string _uploadTarget;
+    bool _uploadFailed = false;
+    int _uploadRefusal = 0;
+    std::function<void()> _onSettingsSaved;
+    std::function<bool(const std::string&)> _onCommand;
+    std::function<Status()> _statusProvider;
 };
 
 #endif
