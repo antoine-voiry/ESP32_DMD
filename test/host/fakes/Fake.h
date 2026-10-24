@@ -24,6 +24,8 @@ extern std::string timezone;  // last configTzTime() TZ
 
 extern int restarts;
 extern int deepSleeps;
+// The BOOT button (GPIO0) stays pressed this long after pinMode() sets it up.
+extern unsigned long bootButtonHeldMs;
 void seedRandom(uint32_t seed);
 
 struct WiFiState {
@@ -32,6 +34,7 @@ struct WiFiState {
     std::string hostname = "dmd";
     int rssi = -58;
     int reconnects = 0;
+    int mode = 0;  // wifi_mode_t; the setup portal adds the access point
     std::function<void(int)> eventHandler;
 };
 extern WiFiState wifi;

@@ -324,11 +324,35 @@ static void testWifiSetup() {
     WifiManagerHelper().connect(true, nullptr);
     CHECK_EQ(fake::restarts, 1);
 
-    // Wi-Fi events: reconnect when the connection drops.
+    // Wi-Fi events: reconnect when the connection drops...
+    freshBoard();
+    WifiManagerHelper().connect(false, nullptr);
     fake::wifi.eventHandler(ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
     fake::wifi.eventHandler(ARDUINO_EVENT_WIFI_STA_GOT_IP);
     fake::wifi.eventHandler(ARDUINO_EVENT_OTHER);
     CHECK_EQ(fake::wifi.reconnects, 1);
+
+    // ...but not while the portal's access point is up (the phone joining it would be dropped).
+    freshBoard();
+    fake::portal.savedNetworkWorks = false;
+    WifiManagerHelper().connect(false, [&](const std::string&, const std::string&) {
+        fake::wifi.eventHandler(ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
+    });
+    CHECK_EQ(fake::portal.opened, 1);
+    CHECK_EQ(fake::wifi.reconnects, 0);
+
+    // BOOT held for 1.5 s at start-up: the portal opens although the saved network works.
+    freshBoard();
+    fake::bootButtonHeldMs = 2000;
+    WifiManagerHelper().connect(false, nullptr);
+    CHECK_EQ(fake::portal.opened, 1);
+
+    // A shorter press does not.
+    freshBoard();
+    fake::bootButtonHeldMs = 1000;
+    WifiManagerHelper().connect(false, nullptr);
+    CHECK_EQ(fake::portal.opened, 0);
+    CHECK(fake::wifi.connected);
 }
 
 static void testTimeService() {

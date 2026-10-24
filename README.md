@@ -56,7 +56,8 @@ renderer. It accepts the same messages and settings, with no Pi needed.
 
 3. **Connect it.** The panel shows `WiFi DMD_CONFIG_WIFI` and a password: join that access point with
    it, then enter your Wi-Fi network, the MQTT broker (usually `raspydarts.local`), the topic and a
-   hostname. The portal opens again whenever the saved network cannot be reached.
+   hostname. The portal opens again whenever the saved network cannot be reached. To change networks,
+   press reset, then hold BOOT for two seconds (not during reset: that starts the flashing mode).
 
 4. **Play.** Raspydarts now drives the panel. To try it by hand:
 

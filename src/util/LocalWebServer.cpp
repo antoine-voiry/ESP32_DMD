@@ -253,8 +253,8 @@ void LocalWebServer::handleConfig() {
     html += F("'></div><p class='muted'>The pages answer on the board's IP address, its hostname, and the "
               "hostname under .local, .lan, .home, .internal, .fritz.box and similar private domains. "
               "If your router uses another private one (hostname.station), enter it here.</p>");
-    html += F("<p class='muted'>Saving restarts the board. To change the Wi-Fi network, erase the board or "
-              "move it out of range: the setup portal opens when it cannot connect.</p>"
+    html += F("<p class='muted'>Saving restarts the board. To change the Wi-Fi network, press reset, "
+              "then hold BOOT for two seconds: the setup portal opens.</p>"
               "<input type='submit' value='Save'></form></div>");
     _server.send(200, "text/html", page("Wi-Fi & MQTT", "/config", html));
 }

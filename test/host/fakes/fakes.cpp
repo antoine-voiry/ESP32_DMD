@@ -35,6 +35,7 @@ time_t epoch = 0;
 std::string timezone;
 int restarts = 0;
 int deepSleeps = 0;
+unsigned long bootButtonHeldMs = 0;
 static uint32_t g_random = 1;
 WiFiState wifi;
 bool fsMountFails = false;
@@ -118,6 +119,7 @@ void resetAll() {
     g_millis = 1000;
     restarts = 0;
     deepSleeps = 0;
+    bootButtonHeldMs = 0;
     seedRandom(1);
     wifi = WiFiState();
     fsReset();
@@ -151,6 +153,14 @@ MDNSResponder MDNS;
 void EspClass::restart() { ++fake::restarts; }
 unsigned long millis() { return fake::g_millis; }
 void delay(unsigned long ms) { fake::g_millis += ms; }
+
+static unsigned long g_bootButtonSince = 0;
+void pinMode(uint8_t pin, uint8_t) {
+    if (pin == 0) g_bootButtonSince = fake::g_millis;
+}
+int digitalRead(uint8_t pin) {
+    return pin == 0 && fake::g_millis - g_bootButtonSince < fake::bootButtonHeldMs ? LOW : HIGH;
+}
 float temperatureRead() { return 42.5f; }
 uint32_t getCpuFrequencyMhz() { return 240; }
 
@@ -208,6 +218,11 @@ IPAddress WiFiClass::localIP() {
 }
 const char* WiFiClass::getHostname() { return fake::wifi.hostname.c_str(); }
 int WiFiClass::RSSI() { return fake::wifi.rssi; }
+bool WiFiClass::mode(wifi_mode_t mode) {
+    fake::wifi.mode = mode;
+    return true;
+}
+wifi_mode_t WiFiClass::getMode() { return static_cast<wifi_mode_t>(fake::wifi.mode); }
 bool WiFiClass::reconnect() {
     ++fake::wifi.reconnects;
     return true;
@@ -254,8 +269,10 @@ bool WiFiManager::startConfigPortal(const char* ssid, const char* password) {
     ++fake::portal.opened;
     fake::portal.ssid = ssid;
     fake::portal.password = password ? password : "";
+    fake::wifi.mode = WIFI_AP_STA;
     if (_ap) _ap(this);
     if (!fake::portal.userConnects) return false;
+    fake::wifi.mode = WIFI_STA;
     for (WiFiManagerParameter* p : _params) {
         auto it = fake::portal.entered.find(p->getID());
         if (it != fake::portal.entered.end()) p->setValue(it->second);
