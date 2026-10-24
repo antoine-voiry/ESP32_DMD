@@ -1,5 +1,7 @@
 // MessageHandler (every MQTT command) and AttractController (attract mode, carousel, standalone).
 
+#include <algorithm>
+
 #include "fixtures.h"
 #include "fw_test.h"
 #include "matrix/Hub75_Matrix.h"

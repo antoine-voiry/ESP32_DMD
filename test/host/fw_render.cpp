@@ -1,5 +1,6 @@
 // Scenes drawn on the panel: text and its movements, effects, clock, PNG and GIF, renderer facade.
 
+#include <algorithm>
 #include <Adafruit_GFX.h>
 
 #include "fixtures.h"
