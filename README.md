@@ -119,7 +119,7 @@ flowchart LR
 ```bash
 make -C test/host            # core logic (ASan + UBSan) and a C++11 compile check, no dependencies
 make -C test/host all        # + JSON parsers and the whole firmware (fetches the libraries once)
-make -C test/host coverage   # all of the above with line coverage of src/, fails under 90 %
+make -C test/host coverage   # all of the above with line coverage of src/, fails under 95 %
 ```
 
 The firmware tests run the real `src/` (services, scenes, web pages, `main.cpp`) on a PC, with the

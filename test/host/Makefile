@@ -1,6 +1,6 @@
 # Host tests. make -C test/host            core tests (no dependencies)
 #             make -C test/host all        + JSON and firmware tests (fetches the libraries once)
-#             make -C test/host coverage   all tests with line coverage, fails under 90 %
+#             make -C test/host coverage   all tests with line coverage, fails under 95 %
 CXX ?= g++
 CC ?= gcc
 SRC_DIR := ../../src
@@ -79,7 +79,7 @@ coverage: | $(DEPS)/.done $(BUILD)/libs.a
 	cd $(BUILD)/cov && $(CXX) -std=gnu++17 -O0 -g --coverage $(SAN) $(FW_DEFINES) -I../../fakes -I../../$(SRC_DIR) \
 		$(addprefix -isystem ../../,$(ARDUINOJSON) $(GFX) $(GIF) $(PNGDEC)) \
 		$(addprefix ../../,$(FW_TESTS) $(FW_SRCS)) ../libs.a -Wl,--wrap=time -o test_firmware && ./test_firmware
-	gcovr --root ../.. --filter '../../src/' --object-directory $(BUILD)/cov --fail-under-line 90 \
+	gcovr --root ../.. --filter '../../src/' --object-directory $(BUILD)/cov --fail-under-line 95 \
 		--print-summary --txt $(BUILD)/coverage.txt $(BUILD)/cov
 	@cat $(BUILD)/coverage.txt
 
