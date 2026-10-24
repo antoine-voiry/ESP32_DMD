@@ -15,17 +15,34 @@ namespace {
 
 constexpr int kFieldLength = 255;
 constexpr unsigned kPortalTimeoutSec = 600;
+constexpr uint8_t kBootButtonPin = 0;  // GPIO0, the board's BOOT button
+constexpr unsigned long kBootButtonHoldMs = 1500;
 
 void onWiFiEvent(WiFiEvent_t event) {
     if (event == ARDUINO_EVENT_WIFI_STA_GOT_IP) {
         ESP_LOGI(TAG, "Connected, IP %s", WiFi.localIP().toString().c_str());
     } else if (event == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
-        ESP_LOGW(TAG, "Connection lost, reconnecting");
-        WiFi.reconnect();
+        // Not while the setup portal's access point is up: reconnect attempts make the radio hop
+        // channels, which drops the phone joining the portal.
+        if (WiFi.getMode() == WIFI_STA) {
+            ESP_LOGW(TAG, "Connection lost, reconnecting");
+            WiFi.reconnect();
+        }
     }
 }
 
 }  // namespace
+
+bool WifiManagerHelper::bootButtonHeld() {
+    pinMode(kBootButtonPin, INPUT_PULLUP);
+    delay(50);
+    const unsigned long start = millis();
+    while (digitalRead(kBootButtonPin) == LOW) {
+        if (millis() - start >= kBootButtonHoldMs) return true;
+        delay(10);
+    }
+    return false;
+}
 
 std::string WifiManagerHelper::newPortalPassword() {
     static const char kAlphabet[] = "abcdefghjkmnpqrstuvwxyz23456789";
@@ -38,6 +55,10 @@ std::string WifiManagerHelper::newPortalPassword() {
 
 void WifiManagerHelper::connect(bool forcePortal, const PortalNotice& notice) {
     ConfigHelper& config = ConfigHelper::getInstance();
+    if (!forcePortal && bootButtonHeld()) {
+        ESP_LOGW(TAG, "BOOT button held, opening the setup portal");
+        forcePortal = true;
+    }
     WiFi.mode(WIFI_STA);
     WiFi.setAutoReconnect(true);
     esp_wifi_set_ps(WIFI_PS_NONE);  // power saving adds latency to MQTT messages

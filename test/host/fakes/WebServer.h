@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "Arduino.h"
+#include "WiFi.h"
 
 enum HTTPMethod { HTTP_ANY, HTTP_GET, HTTP_POST };
 enum HTTPUploadStatus { UPLOAD_FILE_START, UPLOAD_FILE_WRITE, UPLOAD_FILE_END, UPLOAD_FILE_ABORTED };
@@ -47,6 +48,7 @@ public:
     String argName(int i) const;
     int args() const { return static_cast<int>(_args.size()); }
     HTTPUpload& upload() { return _upload; }
+    WiFiClient client() const { return _client; }
 
     void sendHeader(const char* name, const char* value);
     void send(int code, const char* contentType = nullptr, const String& body = String());
@@ -69,6 +71,7 @@ public:
     std::map<std::string, std::string> _headers;
     std::vector<std::pair<std::string, std::string>> _args;
     HTTPUpload _upload;
+    WiFiClient _client;
 };
 
 #endif

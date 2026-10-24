@@ -9,11 +9,12 @@ namespace dmd {
 namespace {
 
 // glibc fr_FR names, as Python's strftime printed them on the Pi (accents are stripped later).
-const char* const kFrMonthsAbbr[] = {"janv.", "f\xC3\xA9vr.", "mars", "avr.", "mai", "juin",
-                                     "juil.", "ao\xC3\xBBt", "sept.", "oct.", "nov.", "d\xC3\xA9" "c."};
-const char* const kFrMonths[] = {"janvier", "f\xC3\xA9vrier", "mars", "avril", "mai", "juin",
-                                 "juillet", "ao\xC3\xBBt", "septembre", "octobre", "novembre",
-                                 "d\xC3\xA9" "cembre"};
+// UTF-8 accents as octal escapes: unlike \x, they stop after three digits ("d\303\251c.").
+const char* const kFrMonthsAbbr[] = {"janv.", "f\303\251vr.", "mars", "avr.", "mai", "juin",
+                                     "juil.", "ao\303\273t", "sept.", "oct.", "nov.", "d\303\251c."};
+const char* const kFrMonths[] = {"janvier", "f\303\251vrier", "mars", "avril", "mai", "juin",
+                                 "juillet", "ao\303\273t", "septembre", "octobre", "novembre",
+                                 "d\303\251cembre"};
 const char* const kFrDaysAbbr[] = {"dim.", "lun.", "mar.", "mer.", "jeu.", "ven.", "sam."};
 const char* const kFrDays[] = {"dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi"};
 
@@ -117,12 +118,34 @@ std::string posixTimezone(const std::string& zone) {
         {"Pacific/Noumea", "<+11>-11"},
         {"Pacific/Tahiti", "<-10>10"},
         {"UTC", "UTC0"},
+        {"GMT", "UTC0"},
+        {"Etc/UTC", "UTC0"},
+        {"Etc/Universal", "UTC0"},
+        {"Etc/Zulu", "UTC0"},
+        {"Etc/Greenwich", "UTC0"},
     };
     for (const auto& z : kZones) {
         if (zone == z.iana) return z.posix;
     }
-    // POSIX strings contain a digit (the UTC offset); IANA names do not (apart from Etc/GMT+N).
+    // Etc/GMT+N is N hours *behind* UTC, the same sign as POSIX: "<-05>5".
+    static const std::string kEtc = "Etc/GMT";
+    if (zone.compare(0, kEtc.size(), kEtc) == 0) {
+        const std::string offset = zone.substr(kEtc.size());
+        if (offset.empty() || offset == "0" || offset == "+0" || offset == "-0") return "UTC0";
+        char* end = nullptr;
+        const long hours = std::strtol(offset.c_str(), &end, 10);
+        if ((offset[0] == '+' || offset[0] == '-') && *end == '\0' && hours >= -14 && hours <= 12) {
+            char posix[16];
+            std::snprintf(posix, sizeof(posix), "<%c%02ld>%ld", hours < 0 ? '+' : '-', hours < 0 ? -hours : hours,
+                          hours);
+            return posix;
+        }
+        return kZones[0].posix;
+    }
+    // A POSIX string has its UTC offset digit before any '/' ("CET-1CEST,M3.5.0,M10.5.0/3");
+    // an IANA name has its '/' first ("America/Chicago").
     for (char c : zone) {
+        if (c == '/') break;
         if (c >= '0' && c <= '9') return zone;
     }
     return kZones[0].posix;

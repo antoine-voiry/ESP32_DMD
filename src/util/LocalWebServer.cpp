@@ -120,23 +120,43 @@ void LocalWebServer::route(const char* path, HTTPMethod method, void (LocalWebSe
     });
 }
 
-int LocalWebServer::refusal(bool post) {
+int LocalWebServer::refusal(bool post, bool countRequest) {
     const std::string ip = WiFi.localIP().toString().c_str();
     const std::string host = _server.hostHeader().c_str();
     const std::string origin = _server.header("Origin").c_str();
-    if (!dmd::hostAllowed(host, ip, _hostname) || (post && !dmd::originAllowed(origin, ip, _hostname))) {
+    const std::string& lan = lanDomain();
+    if (!dmd::hostAllowed(host, ip, _hostname, lan) || (post && !dmd::originAllowed(origin, ip, _hostname, lan))) {
         ESP_LOGW(TAG, "Refused %s (Host '%s', Origin '%s')", _server.uri().c_str(), host.c_str(), origin.c_str());
         return 403;
     }
-    return post && !checkRateLimit() ? 429 : 0;
+    return post && countRequest && !checkRateLimit() ? 429 : 0;
 }
 
 bool LocalWebServer::requestAllowed(bool post) {
     const int code = refusal(post);
-    if (code != 0) {
-        _server.send(code, "text/plain", code == 403 ? "Forbidden" : "Too many requests");
+    if (code == 403) {
+        _server.send(403, "text/plain", forbiddenText().c_str());
+    } else if (code != 0) {
+        _server.send(code, "text/plain", "Too many requests");
     }
     return code == 0;
+}
+
+std::string LocalWebServer::forbiddenText() {
+    // Only the address typed in the browser is echoed back (as plain text), never page content.
+    const std::string ip = WiFi.localIP().toString().c_str();
+    const std::string host = _server.hostHeader().c_str();
+    if (dmd::hostAllowed(host, ip, _hostname, lanDomain())) {
+        return "Forbidden: this form was sent from another web site.";  // the Origin check refused it
+    }
+    std::string text = "Forbidden: this board only answers on its own names, to keep other web sites out.\n"
+                       "Open http://" + ip + "/ instead.";
+    const std::string suffix = dmd::lanSuffix(host, _hostname);
+    if (dmd::isValidLanDomain(suffix)) {
+        text += " If " + dmd::hostWithoutPort(host) + " is your router's name for the board, enter \"" + suffix +
+                "\" as the LAN domain on http://" + ip + "/config.";
+    }
+    return text;
 }
 
 bool LocalWebServer::checkRateLimit() {
@@ -228,8 +248,13 @@ void LocalWebServer::handleConfig() {
         html += dmd::htmlEscape(values[i]).c_str();
         html += "'></div>";
     }
-    html += F("<p class='muted'>Saving restarts the board. To change the Wi-Fi network, erase the board or "
-              "move it out of range: the setup portal opens when it cannot connect.</p>"
+    html += "<div class='f'><label>LAN domain (optional)</label><input name='lan_domain' value='";
+    html += dmd::htmlEscape(config.getLanDomain()).c_str();
+    html += F("'></div><p class='muted'>The pages answer on the board's IP address, its hostname, and the "
+              "hostname under .local, .lan, .home, .internal, .fritz.box and similar private domains. "
+              "If your router uses another private one (hostname.station), enter it here.</p>");
+    html += F("<p class='muted'>Saving restarts the board. To change the Wi-Fi network, press reset, "
+              "then hold BOOT for two seconds: the setup portal opens.</p>"
               "<input type='submit' value='Save'></form></div>");
     _server.send(200, "text/html", page("Wi-Fi & MQTT", "/config", html));
 }
@@ -243,7 +268,16 @@ void LocalWebServer::handleSaveConfig() {
             return;
         }
     }
+    // Absent (a script posting the three portal fields) keeps it; an empty field clears it.
+    const bool hasLanDomain = _server.hasArg("lan_domain");
+    const std::string lanDomain = _server.arg("lan_domain").c_str();
+    if (!lanDomain.empty() && !dmd::isValidLanDomain(lanDomain)) {
+        _server.send(400, "text/plain", "The LAN domain must be your network's private domain (letters, "
+                                        "digits, '-' and '.', like station), not under a public one like com");
+        return;
+    }
     ConfigHelper& config = ConfigHelper::getInstance();
+    if (hasLanDomain) config.setLanDomain(lanDomain);
     config.setMqttUrl(values[0]);
     config.setMqttPath(values[1]);
     config.setHostname(values[2]);
@@ -300,7 +334,17 @@ void LocalWebServer::handleFiles() {
 void LocalWebServer::handleUpload() {
     HTTPUpload& upload = _server.upload();
     if (upload.status == UPLOAD_FILE_START) {
-        _uploadRefusal = refusal(true);
+        const std::string from = clientKey();
+        const bool newRequest = !_uploadStarted || from != _uploadClient;
+        if (newRequest) {
+            resetUploadRequest();
+            _uploadStarted = true;
+            _uploadClient = from;
+        }
+        // Every file is checked, but a request counts once against the rate limit.
+        const int code = refusal(true, newRequest);
+        if (code != 0) _uploadRefusal = code;
+        ++_uploadFiles;
         _uploadTarget = dmd::uploadPath(_server.arg("dir").c_str(), upload.filename.c_str());
         _uploadFailed = _uploadRefusal != 0 || _uploadTarget.empty() || _uploadTarget == ConfigHelper::kFile;
         if (_uploadFailed) {
@@ -326,20 +370,60 @@ void LocalWebServer::handleUpload() {
         if (_uploadFailed && !_uploadTarget.empty()) {
             storage().remove(_uploadTarget.c_str());  // never leave a truncated file behind
         }
+        if (upload.status != UPLOAD_FILE_END) {
+            resetUploadRequest();  // the server drops an aborted request without calling handleUploadDone()
+        } else if (_uploadFailed) {
+            ++_uploadFailures;
+        }
         ESP_LOGI(TAG, "Upload %s: %s (%u bytes)", _uploadFailed ? "failed" : "done", _uploadTarget.c_str(),
                  static_cast<unsigned>(upload.totalSize));
         _uploadTarget.clear();
     }
 }
 
+const std::string& LocalWebServer::lanDomain() {
+    // Checked once per value: the TLD list is 10 KB, and this runs for every request.
+    const std::string& configured = ConfigHelper::getInstance().getLanDomain();
+    if (configured != _lanDomainChecked) {
+        _lanDomainChecked = configured;
+        _lanDomain = dmd::isValidLanDomain(configured) ? configured : "";
+    }
+    return _lanDomain;
+}
+
+std::string LocalWebServer::clientKey() {
+    WiFiClient client = _server.client();
+    return std::string(client.remoteIP().toString().c_str()) + ":" + std::to_string(client.remotePort());
+}
+
 void LocalWebServer::handleUploadDone() {
+    if (!_uploadStarted || clientKey() != _uploadClient) {
+        // No file part in this request (any state left is from an earlier, broken one): check it
+        // here like any other POST.
+        resetUploadRequest();
+        if (requestAllowed(true)) _server.send(400, "text/plain", "No file in the upload");
+        return;
+    }
     if (_uploadRefusal != 0) {
-        _server.send(_uploadRefusal, "text/plain", _uploadRefusal == 403 ? "Forbidden" : "Too many requests");
-    } else if (_uploadFailed) {
-        _server.send(400, "text/plain", "Upload failed (bad name or folder, or filesystem full)");
+        _server.send(_uploadRefusal, "text/plain",
+                     _uploadRefusal == 403 ? forbiddenText().c_str() : "Too many requests");
+    } else if (_uploadFailures > 0) {
+        char text[96];
+        snprintf(text, sizeof(text), "%d of %d upload(s) failed (bad name or folder, or filesystem full)",
+                 _uploadFailures, _uploadFiles);
+        _server.send(400, "text/plain", text);
     } else {
         redirect("/files");
     }
+    resetUploadRequest();
+}
+
+void LocalWebServer::resetUploadRequest() {
+    _uploadStarted = false;
+    _uploadClient.clear();
+    _uploadRefusal = 0;
+    _uploadFiles = 0;
+    _uploadFailures = 0;
 }
 
 void LocalWebServer::handleDelete() {
@@ -389,6 +473,7 @@ void LocalWebServer::handleSaveSettings() {
     ConfigHelper& config = ConfigHelper::getInstance();
     bool restart = false;
     int changed = 0;
+    std::string invalid;
     for (int i = 0; i < _server.args(); i++) {
         const std::string name = _server.argName(i).c_str();
         const size_t dot = name.find('.');
@@ -399,7 +484,11 @@ void LocalWebServer::handleSaveSettings() {
         if (!def) continue;  // only known Raspy2DMD keys
         const std::string value = _server.arg(i).c_str();
         if (config.getSetting(section, key, def->def) == value) continue;
-        config.setSetting(section, key, value);
+        if (!config.setSetting(section, key, value)) {
+            ESP_LOGW(TAG, "Settings page: invalid %s.%s '%s' ignored", section.c_str(), key.c_str(), value.c_str());
+            invalid += invalid.empty() ? name : ", " + name;
+            continue;
+        }
         restart = restart || dmd::needsRestart(section, key);
         ++changed;
     }
@@ -408,13 +497,22 @@ void LocalWebServer::handleSaveSettings() {
         ESP_LOGI(TAG, "%d setting(s) saved from the web page", changed);
     }
     if (restart) {
-        _server.send(200, "text/plain", "Saved, restarting to apply the panel / standalone settings...");
+        std::string text = "Saved, restarting to apply the panel / standalone settings...";
+        if (!invalid.empty()) text += "\nNot saved, invalid value: " + invalid + ".";
+        _server.send(200, "text/plain", text.c_str());
         delay(500);
         ESP.restart();
         return;
     }
     if (changed > 0 && _onSettingsSaved) {
         _onSettingsSaved();
+    }
+    if (!invalid.empty()) {
+        // The rest of the form was saved: 400 only when nothing was.
+        _server.send(changed > 0 ? 200 : 400, "text/plain",
+                     ("Not saved, invalid value: " + invalid + "." + (changed > 0 ? " Other changes were saved." : ""))
+                         .c_str());
+        return;
     }
     redirect("/settings");
 }

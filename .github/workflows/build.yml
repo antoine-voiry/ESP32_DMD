@@ -23,7 +23,7 @@ jobs:
         run: pip install gcovr
       - name: Core, JSON and firmware tests (ASan + UBSan)
         run: make -C test/host all
-      - name: Line coverage of src/ (fails under 90 %)
+      - name: Line coverage of src/ (fails under 95 %)
         run: make -C test/host coverage
       - name: Upload coverage report
         if: always()

@@ -56,7 +56,8 @@ renderer. It accepts the same messages and settings, with no Pi needed.
 
 3. **Connect it.** The panel shows `WiFi DMD_CONFIG_WIFI` and a password: join that access point with
    it, then enter your Wi-Fi network, the MQTT broker (usually `raspydarts.local`), the topic and a
-   hostname. The portal opens again whenever the saved network cannot be reached.
+   hostname. The portal opens again whenever the saved network cannot be reached. To change networks,
+   press reset, then hold BOOT for two seconds (not during reset: that starts the flashing mode).
 
 4. **Play.** Raspydarts now drives the panel. To try it by hand:
 
@@ -77,7 +78,7 @@ renderer. It accepts the same messages and settings, with no Pi needed.
 | `/` | Board status (IP, Wi-Fi, MQTT, uptime, memory, storage), a send box and presets |
 | `/settings` | Every Raspy2DMD setting, grouped by section. Settings with no effect on the ESP32 are greyed out |
 | `/files` | Upload, browse and delete GIFs, images, carousel texts and `effets.txt` (about 900 KB of LittleFS) |
-| `/config` | MQTT broker, topic and hostname (saving restarts the board) |
+| `/config` | MQTT broker, topic, hostname, and an optional LAN domain (saving restarts the board) |
 
 ## How it works
 
@@ -118,7 +119,7 @@ flowchart LR
 ```bash
 make -C test/host            # core logic (ASan + UBSan) and a C++11 compile check, no dependencies
 make -C test/host all        # + JSON parsers and the whole firmware (fetches the libraries once)
-make -C test/host coverage   # all of the above with line coverage of src/, fails under 90 %
+make -C test/host coverage   # all of the above with line coverage of src/, fails under 95 %
 ```
 
 The firmware tests run the real `src/` (services, scenes, web pages, `main.cpp`) on a PC, with the

@@ -33,20 +33,22 @@ static OnlineService onlineService;
 static dmd::PanelGeometry panel = {PANEL_WIDTH, PANEL_HEIGHT, PANELS_NUMBER};
 static std::string mqttBroker;
 static int mqttWasConnected = -1;  // unknown until the first check
+// Broker down at boot: the status line waits until the start-up notices have played and the
+// display has been still this long, instead of wiping them (or replacing the logo at once).
+static constexpr uint32_t kBootStatusDelayMs = 2000;
+static constexpr uint32_t kBootStatusMaxWaitMs = 30000;  // attract or standalone shows may never stop
+static bool bootStatusPending = false;
+static uint32_t displayStillSince = 0;
+static uint32_t bootStatusSince = 0;
 
 // One path for every command, whether it came from MQTT or the web page's "Send" box.
 static bool dispatchMessage(const std::string& message) {
-    if (!dmd::isAcceptedPayload(message)) {
-        ESP_LOGW(TAG, "Invalid message: %s", message.c_str());
-        return false;
-    }
-    if (!messageHandler->accepts(message)) {
-        ESP_LOGI(TAG, "Standalone mode, ignored: %s", message.c_str());
-        return false;
-    }
-    attract->onMessage(millis());
-    messageHandler->handleMessage(message);
-    return true;
+    bool interrupted = false;
+    const bool shown = messageHandler->handleMessage(message, &interrupted);
+    // Once the user has touched the display, never cover it with the boot status (the dashboard
+    // shows the MQTT state).
+    if (interrupted) bootStatusPending = false;
+    return shown;
 }
 
 static std::string formatUptime(unsigned long ms) {
@@ -164,14 +166,31 @@ void loop() {
         if (mqttWasConnected != 1) {
             ESP_LOGI(TAG, "MQTT connected");
             mqttWasConnected = 1;
+            bootStatusPending = false;
         }
         for (const std::string& message : mqttClient->takeMessages()) {
             dispatchMessage(message);
         }
     } else if (mqttWasConnected != 0) {
         // Report the state change once instead of redrawing it on every loop.
-        dmdRenderer->renderStatus("MQTT not connected");
+        if (mqttWasConnected == -1) {
+            bootStatusPending = true;
+            displayStillSince = bootStatusSince = millis();
+        } else {
+            dmdRenderer->renderStatus("MQTT not connected");
+        }
         mqttWasConnected = 0;
+    }
+    if (bootStatusPending) {
+        if (millis() - bootStatusSince >= kBootStatusMaxWaitMs) {
+            dmdRenderer->renderStatus("MQTT not connected");  // the display never settled: show it now
+            bootStatusPending = false;
+        } else if (!dmdRenderer->idle()) {
+            displayStillSince = millis();
+        } else if (millis() - displayStillSince >= kBootStatusDelayMs) {
+            dmdRenderer->renderText("MQTT not connected");
+            bootStatusPending = false;
+        }
     }
     attract->loop(millis());
     timeService.loop(millis(), *dmdRenderer);

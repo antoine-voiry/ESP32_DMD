@@ -1,5 +1,7 @@
 // MessageHandler (every MQTT command) and AttractController (attract mode, carousel, standalone).
 
+#include <algorithm>
+
 #include "fixtures.h"
 #include "fw_test.h"
 #include "matrix/Hub75_Matrix.h"
@@ -71,6 +73,21 @@ static void testTextCommands() {
     b.send("msgfx|Hello|nope");
     b.send("sound|x.mp3");
     CHECK(b.panel()->litPixels() > 0);
+
+    // Holds are capped at kMaxHoldSec, and never wrap around ("4294968" s * 1000 > 2^32).
+    for (const char* hold : {"99999", "4294968"}) {
+        b.handler.handleMessage(std::string("msg|Held|") + hold);
+        runFor(b.renderer, (MessageHandler::kMaxHoldSec - 1) * 1000, 1000);
+        CHECK(!b.renderer.idle());
+        runFor(b.renderer, 2000, 1000);
+        CHECK(b.renderer.idle());
+    }
+
+    // Every action the filter lets through has a handler.
+    for (const std::string& action : dmd::knownActions()) {
+        if (!b.handler.handles(action)) std::printf("no handler for %s\n", action.c_str());
+        CHECK(b.handler.handles(action));
+    }
 
     // Malformed, unknown, missing arguments: nothing breaks.
     b.send("nopipe");
@@ -149,11 +166,19 @@ static void testConfCommands() {
     CHECK_EQ(ConfigHelper::getInstance().getBrightness(), 50);
     b.send("conf|DMDRenderer|brightness:150");  // refused
     CHECK_EQ(ConfigHelper::getInstance().getBrightness(), 50);
+    b.send("conf|DMDRenderer|Brightness:150");  // whatever the key's case, and nothing is saved
+    CHECK_EQ(ConfigHelper::getInstance().getBrightness(), 50);
+    CHECK(!fake::fileExists("/config.json") ||
+          fake::readFile("/config.json").find("150") == std::string::npos);
+    b.send("conf|DMDRenderer|Brightness:30");
+    CHECK_EQ(b.panel()->brightness, 30 * 255 / 100);
     b.send("conf|DMDRenderer|brightnesshours:10,20|nocolon");
     CHECK_EQ(ConfigHelper::getInstance().getBrightnessHours(), std::string("10,20"));
     b.send("conf|DMDRenderer|center_images:0");
     b.send("conf|ClockRenderer|timezone:Europe/London");
     CHECK_EQ(fake::timezone, std::string("GMT0BST,M3.5.0/1,M10.5.0"));
+    b.send("conf|ClockRenderer|TimeZone:Etc/UTC");  // applied whatever the key's case
+    CHECK_EQ(fake::timezone, std::string("UTC0"));
     b.send("conf|OpenWeatherMap|appid:abc");
     b.send("conf|TextRenderer|defaultfontcolor:255,0,0");
     CHECK_EQ(b.renderer.defaultStyle().fg.r, 255);
@@ -180,12 +205,18 @@ static void testReceipconfAndStandalone() {
     CHECK_EQ(b.published[0].first, std::string("raspydarts/dmd"));
     CHECK_EQ(b.published[0].second, std::string("DMDRenderer:cols:64"));
 
-    CHECK(b.handler.accepts("score|T20"));
+    CHECK(b.handler.handleMessage("score|T20"));
+    CHECK(!b.handler.handleMessage("score|T21"));  // not a dart
+    CHECK(!b.handler.handleMessage("garbage"));
+    bool interrupted = false;
+    CHECK(!b.handler.handleMessage("msgmove|too few", &interrupted));  // interrupts, then is dropped
+    CHECK(interrupted);
+    CHECK(!b.handler.handleMessage("garbage", &interrupted));
+    CHECK(!interrupted);
     setSetting("Running", "standalone", "1");
-    CHECK(!b.handler.accepts("score|T20"));
-    CHECK(b.handler.accepts("meteo|"));
-    CHECK(!b.handler.accepts("garbage"));
-    b.handler.handleMessage("msgmove|ignored|left");  // standalone: not even an interrupt
+    CHECK(!b.handler.handleMessage("score|T20"));
+    CHECK(!b.handler.handleMessage("msgmove|ignored|left"));  // standalone: not even an interrupt
+    CHECK(b.handler.handleMessage("msg|Standalone"));
 }
 
 static void testOnlineCommands() {

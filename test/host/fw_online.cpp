@@ -1,5 +1,7 @@
 // OnlineService (background fetches, cache, errors) and the weather / Tempo / geocoding / perf scenes.
 
+#include <algorithm>
+
 #include "fixtures.h"
 #include "fw_test.h"
 #include "matrix/Hub75_Matrix.h"

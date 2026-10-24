@@ -18,14 +18,15 @@ MessageHandler::MessageHandler(DMDRenderer* renderer, AttractController* attract
                                MediaLibrary* media, OnlineService* online)
     : dmdRenderer(renderer), attract(attract), timeService(timeService), media(media), online(online) {
     setupHandlers();
+    for (const std::string& action : dmd::knownActions()) {
+        if (!handles(action)) ESP_LOGE(TAG, "No handler for '%s'", action.c_str());
+    }
 }
 
 uint32_t MessageHandler::effectDuration(const std::vector<std::string>& params, size_t i) {
     constexpr uint32_t kDefaultMs = 5000;
-    constexpr uint32_t kMaxMs = 10u * 60u * 1000u;  // a stuck "fx|plasma|99999" would block the queue
-    uint32_t ms = holdArg(params, i);
-    if (ms == 0) return kDefaultMs;
-    return ms > kMaxMs ? kMaxMs : ms;
+    const uint32_t ms = holdArg(params, i);  // already capped at kMaxHoldSec
+    return ms == 0 ? kDefaultMs : ms;
 }
 
 uint32_t MessageHandler::holdArg(const std::vector<std::string>& params, size_t i) {
@@ -33,7 +34,9 @@ uint32_t MessageHandler::holdArg(const std::vector<std::string>& params, size_t 
         return 0;
     }
     long seconds = dmd::parseIntArg(params[i], 0);
-    return seconds > 0 ? static_cast<uint32_t>(seconds) * 1000u : 0;
+    if (seconds <= 0) return 0;
+    if (seconds > kMaxHoldSec) seconds = kMaxHoldSec;  // also keeps seconds * 1000 within uint32
+    return static_cast<uint32_t>(seconds) * 1000u;
 }
 
 void MessageHandler::setupHandlers() {
@@ -81,7 +84,11 @@ void MessageHandler::setupHandlers() {
         TextRequest request;
         request.text = params[0];
         request.motion = dmd::parseMotion(params[1]);
-        request.iterations = static_cast<int>(dmd::parseIntArg(params[2], 1));
+        // A scroll's length depends on the text, so the display queue cannot budget it: cap the
+        // repeats instead ("msgmovebcl|x|left|2000000000" would scroll for ever).
+        constexpr long kMaxIterations = 20;
+        const long iterations = dmd::parseIntArg(params[2], 1);
+        request.iterations = static_cast<int>(iterations > kMaxIterations ? kMaxIterations : iterations);
         dmdRenderer->renderText(request, params.size() == 4 ? holdArg(params, 3) : 0);
     };
 
@@ -213,9 +220,19 @@ void MessageHandler::setupHandlers() {
         if (params[0] != "gif") {
             return;
         }
-        constexpr size_t kMaxDemoGifs = 200;
+        // Two scenes per GIF: 100 at most, under the display queue's 128 (from an empty queue;
+        // if it is fuller, the demo's last GIFs are refused, which is logged).
+        constexpr size_t kMaxDemoGifs = 50;
         const std::vector<std::string> gifs = media->allGifs();
+        if (gifs.size() > kMaxDemoGifs) {
+            ESP_LOGW(TAG, "demo: showing the first %u of %u GIFs", static_cast<unsigned>(kMaxDemoGifs),
+                     static_cast<unsigned>(gifs.size()));
+        }
         for (size_t i = 0; i < gifs.size() && i < kMaxDemoGifs; ++i) {
+            if (dmdRenderer->queueRoom() < 2) {  // never a name without its GIF
+                ESP_LOGW(TAG, "demo: display queue full after %u GIFs", static_cast<unsigned>(i));
+                break;
+            }
             dmdRenderer->renderText(dmd::baseName(gifs[i]), 500);
             dmdRenderer->renderGif(gifs[i], 500);
         }
@@ -352,11 +369,9 @@ void MessageHandler::reloadSettings() {
     online->invalidate();
 }
 
-bool MessageHandler::accepts(const std::string& message) const {
+bool MessageHandler::accepts(const dmd::Command& command) const {
     // Standalone mode: no interaction with the game beyond these commands (ServerRaspy2DMD.py).
-    if (!settings::standalone()) return true;
-    dmd::Command command;
-    return dmd::parseCommand(message, command) && dmd::allowedInStandalone(command.action);
+    return !settings::standalone() || dmd::allowedInStandalone(command.action);
 }
 
 void MessageHandler::sendConfig() {
@@ -431,35 +446,31 @@ void MessageHandler::applyConf(const std::vector<std::string>& params) {
         }
         const std::string key = kv.substr(0, colon);
         const std::string value = kv.substr(colon + 1);
-        if (section == "DMDRenderer" && key == "brightness") {
-            long pct = dmd::parseIntArg(value, -1);
-            if (pct < 0 || pct > 100) {
-                ESP_LOGW(TAG, "conf: invalid brightness '%s'", value.c_str());
-                continue;
-            }
-            config.setBrightness(static_cast<int>(pct));
-            dmdRenderer->setBrightnessPercent(static_cast<int>(pct));
-            changed = true;
-            ESP_LOGI(TAG, "Brightness set to %ld %%", pct);
-        } else if (section == "DMDRenderer" && key == "brightnesshours") {
-            config.setBrightnessHours(value);
+        // ConfigHelper validates what it can (brightness 0..100), for the web page as for conf.
+        if (!config.setSetting(section, key, value)) {
+            ESP_LOGW(TAG, "conf: invalid [%s] %s '%s' ignored", section.c_str(), key.c_str(), value.c_str());
+            continue;
+        }
+        changed = true;
+        const std::string normalised = dmd::normaliseKey(key);
+        if (section == "DMDRenderer" && normalised == "brightness") {
+            dmdRenderer->setBrightnessPercent(config.getBrightness());
+            ESP_LOGI(TAG, "Brightness set to %d %%", config.getBrightness());
+        } else if (section == "DMDRenderer" && normalised == "brightnesshours") {
             timeService->invalidate();
-            changed = true;
         } else {
-            // Everything else is stored and read live (see util/Settings).
-            config.setSetting(section, key, value);
-            changed = true;
-            if (dmd::needsRestart(section, key)) {
+            // Everything else is read live (see util/Settings).
+            if (dmd::needsRestart(section, normalised)) {
                 restartPending = true;
             }
             ESP_LOGI(TAG, "conf: [%s] %s = %s", section.c_str(), key.c_str(), value.c_str());
             if (section == "OpenWeatherMap") {
                 online->invalidate();
             }
-            if (section == "DMDRenderer" && key == "center_images") {
+            if (section == "DMDRenderer" && normalised == "center_images") {
                 dmdRenderer->setCenterImages(value != "0");
             }
-            if (section == "ClockRenderer" && key == "timezone") {
+            if (section == "ClockRenderer" && normalised == "timezone") {
                 timeService->begin(settings::timezone());
                 timeService->invalidate();
             }
@@ -480,35 +491,44 @@ void MessageHandler::applyConf(const std::vector<std::string>& params) {
     }
 }
 
-void MessageHandler::handleMessage(const std::string& message) {
+bool MessageHandler::handleMessage(const std::string& message, bool* interrupted) {
+    if (interrupted) *interrupted = false;
     ESP_LOGD(TAG, "Handling message: %s", message.c_str());
 
     dmd::Command command;
-    if (!dmd::parseCommand(message, command)) {
-        ESP_LOGW(TAG, "Malformed message: %s", message.c_str());
-        return;
+    if (!dmd::parseCommand(message, command) || !dmd::isAcceptedCommand(command)) {
+        ESP_LOGW(TAG, "Invalid message: %s", message.c_str());
+        return false;
     }
-
-    if (!accepts(message)) {
+    if (!accepts(command)) {
         ESP_LOGI(TAG, "Standalone mode: '%s' ignored", command.action.c_str());
-        return;
+        return false;
     }
+    attract->onMessage(millis());
 
     // Like the original: every accepted message stops the current animation first,
     // even if its own arguments turn out to be missing.
     dmdRenderer->interrupt();
+    if (interrupted) *interrupted = true;
 
     if (command.args.size() < dmd::minArgs(command.action)) {
         ESP_LOGE(TAG, "Missing arguments for '%s': got %u, expected %u", command.action.c_str(),
                  static_cast<unsigned>(command.args.size()),
                  static_cast<unsigned>(dmd::minArgs(command.action)));
-        return;
+        return false;  // it interrupted the display, like the original, but showed nothing
     }
 
-    auto handler = handlers.find(command.action);
+    // Every known action has a handler (test_firmware checks it); the guard keeps a future
+    // omission from dereferencing end().
+    const auto handler = handlers.find(command.action);
     if (handler == handlers.end()) {
-        ESP_LOGW(TAG, "Unknown action received: %s", command.action.c_str());
-        return;
+        ESP_LOGE(TAG, "No handler for '%s'", command.action.c_str());
+        return false;  // nothing was shown
     }
     handler->second(command.args);
+    return true;
+}
+
+bool MessageHandler::handles(const std::string& action) const {
+    return handlers.count(action) == 1;
 }

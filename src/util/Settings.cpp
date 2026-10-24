@@ -18,6 +18,15 @@ long intSetting(const char* section, const char* key, long fallback) {
     return ConfigHelper::getInstance().getSettingInt(section, key, fallback);
 }
 
+// A duration setting: negative -> fallback, capped at maxValue (keeps "* 1000" within uint32).
+long durationSetting(const char* section, const char* key, long fallback, long maxValue) {
+    const long v = intSetting(section, key, fallback);
+    if (v < 0) return fallback;
+    return v > maxValue ? maxValue : v;
+}
+
+constexpr long kMaxSeconds = 24L * 3600L;
+
 std::string strSetting(const char* section, const char* key, const char* fallback) {
     return ConfigHelper::getInstance().getSetting(section, key, fallback);
 }
@@ -27,8 +36,8 @@ std::string strSetting(const char* section, const char* key, const char* fallbac
 ClockSpec clockSpec() {
     ClockSpec spec;
     spec.mode = static_cast<int>(intSetting("ClockRenderer", "showing_datehours", 2));
-    spec.dateMs = static_cast<uint32_t>(intSetting("ClockRenderer", "timeShow_Date", 2)) * 1000u;
-    spec.hoursMs = static_cast<uint32_t>(intSetting("ClockRenderer", "timeShow_Hours", 4)) * 1000u;
+    spec.dateMs = static_cast<uint32_t>(durationSetting("ClockRenderer", "timeShow_Date", 2, kMaxSeconds)) * 1000u;
+    spec.hoursMs = static_cast<uint32_t>(durationSetting("ClockRenderer", "timeShow_Hours", 4, kMaxSeconds)) * 1000u;
     spec.dateFormat = strSetting("ClockRenderer", "format_date", "%d %b %Y");
     spec.hourFormat = strSetting("ClockRenderer", "format_hours", "%H:%M:%S");
     spec.lang = dmd::languageFromLocale(strSetting("ClockRenderer", "format_affichage", "fr_FR"));
@@ -68,8 +77,10 @@ dmd::OwmConfig owmConfig() {
     c.countrycode = strSetting("OpenWeatherMap", "countrycode", "0");
     c.units = strSetting("OpenWeatherMap", "units", "metric");
     c.lang = strSetting("OpenWeatherMap", "lang", "fr");
-    c.callEveryMin = static_cast<int>(intSetting("OpenWeatherMap", "callevery", 15));
-    c.seeDuringSec = static_cast<int>(intSetting("OpenWeatherMap", "seeduring", 4));
+    c.callEveryMin = static_cast<int>(durationSetting("OpenWeatherMap", "callevery", 15, kMaxSeconds / 60));
+    // Weather and Tempo scenes show several pages of this each, and how many is only known once the
+    // data is in, so the display queue cannot budget them: keep a page to a minute at most.
+    c.seeDuringSec = static_cast<int>(durationSetting("OpenWeatherMap", "seeduring", 4, 60));
     c.prevision = static_cast<int>(intSetting("OpenWeatherMap", "prevision", 1));
     return c;
 }
@@ -87,8 +98,7 @@ bool showWebAddress() {
 }
 
 uint32_t attractAfterMs() {
-    long seconds = intSetting("Running", "attract_mode", 0);
-    return seconds > 0 ? static_cast<uint32_t>(seconds) * 1000u : 0;
+    return static_cast<uint32_t>(durationSetting("Running", "attract_mode", 0, kMaxSeconds)) * 1000u;
 }
 
 }  // namespace settings

@@ -25,7 +25,10 @@ bool isKnownAction(const std::string& action);
 size_t minArgs(const std::string& action);
 
 // Port of FilterMessages(): known action, and for "score" a valid dart string.
-bool isAcceptedPayload(const std::string& payload);
+bool isAcceptedCommand(const Command& cmd);
+
+// Every action isKnownAction() accepts.
+std::vector<std::string> knownActions();
 
 // Port of ScoreReceived(): "S20 - T20 - X" style string, every dart a known segment (case-insensitive).
 bool isValidScore(const std::string& score);

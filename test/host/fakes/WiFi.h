@@ -15,7 +15,8 @@ public:
     IPAddress localIP();
     const char* getHostname();
     int RSSI();
-    bool mode(wifi_mode_t) { return true; }
+    bool mode(wifi_mode_t mode);
+    wifi_mode_t getMode();
     bool setAutoReconnect(bool) { return true; }
     bool reconnect();
     void onEvent(void (*handler)(WiFiEvent_t));
@@ -25,6 +26,11 @@ extern WiFiClass WiFi;
 class WiFiClient {
 public:
     virtual ~WiFiClient() = default;
+    IPAddress remoteIP() const { return _remoteIP; }
+    uint16_t remotePort() const { return _remotePort; }
+
+    IPAddress _remoteIP;
+    uint16_t _remotePort = 0;
 };
 
 #endif

@@ -126,6 +126,35 @@ static void testConfigPage() {
     CHECK(ConfigHelper::getInstance().loadConfigFile());
     CHECK_EQ(ConfigHelper::getInstance().getHostname(), std::string("dmd2"));
     CHECK(!contains(fake::readFile("/config.json"), "injected"));
+    CHECK(!contains(fake::readFile("/config.json"), "lan_domain"));  // only saved when set
+
+    // An extra LAN domain opens the pages on hostname.<domain>.
+    web.setHostname("dmd2");
+    fake::WebRequest viaRouter;
+    viaRouter.host = "dmd2.station";
+    viaRouter.uri = "/config";
+    r = fake::request(viaRouter);
+    CHECK_EQ(r.code, 403);
+    CHECK(contains(r.body, "http://192.168.1.42/config") && contains(r.body, "\"station\""));
+    fake::WebRequest viaPublic = viaRouter;  // no hint to trust a public domain
+    viaPublic.host = "dmd2.myhome.example.com";
+    r = fake::request(viaPublic);
+    CHECK_EQ(r.code, 403);
+    CHECK(contains(r.body, "http://192.168.1.42/") && !contains(r.body, "LAN domain"));
+    r = post("/config", {{"mqtt_url", "10.0.0.2"}, {"mqtt_path", "t"}, {"hostname", "dmd2"}, {"lan_domain", "a b"}});
+    CHECK_EQ(r.code, 400);
+    r = post("/config", {{"mqtt_url", "10.0.0.2"}, {"mqtt_path", "t"}, {"hostname", "dmd2"}, {"lan_domain", "station"}});
+    CHECK_EQ(r.code, 200);
+    CHECK(ConfigHelper::getInstance().loadConfigFile());
+    CHECK_EQ(ConfigHelper::getInstance().getLanDomain(), std::string("station"));
+    CHECK_EQ(fake::request(viaRouter).code, 200);
+    CHECK(contains(fake::request(viaRouter).body, "value='station'"));
+    r = post("/config", {{"mqtt_url", "10.0.0.2"}, {"mqtt_path", "t"}, {"hostname", "dmd2"}});  // no field: kept
+    CHECK(ConfigHelper::getInstance().loadConfigFile());
+    CHECK_EQ(ConfigHelper::getInstance().getLanDomain(), std::string("station"));
+    r = post("/config", {{"mqtt_url", "10.0.0.2"}, {"mqtt_path", "t"}, {"hostname", "dmd2"}, {"lan_domain", ""}});
+    CHECK(ConfigHelper::getInstance().loadConfigFile());
+    CHECK(ConfigHelper::getInstance().getLanDomain().empty());
 
     fake::fsReset();
     fake::writeFile("/config.json/x", "");  // cannot be written
@@ -155,9 +184,46 @@ static void testFilesPage() {
     CHECK_EQ(r.code, 303);
     CHECK_EQ(fake::readFile("/gifs/new.gif").size(), 5000u);
 
-    up.uploads = {{"cut.gif", std::string(5000, 'g'), true}};  // connection lost
-    CHECK_EQ(fake::request(up).code, 400);
+    up.uploads = {{"cut.gif", std::string(5000, 'g'), true}};  // connection lost: no answer
+    CHECK_EQ(fake::request(up).code, 0);
     CHECK(!fake::fileExists("/gifs/cut.gif"));
+    up.uploads = {{"after.gif", "x", false}};  // nothing left over from the dropped request
+    CHECK_EQ(fake::request(up).code, 303);
+
+    // Several files: every one is reported, not just the last.
+    up.uploads = {{"", "x", false}, {"two.gif", "x", false}};  // no name: refused
+    r = fake::request(up);
+    CHECK_EQ(r.code, 400);
+    CHECK(contains(r.body, "1 of 2"));
+    CHECK(fake::fileExists("/gifs/two.gif"));
+    // A request that broke after its files leaves nothing behind for the next one.
+    up.uploads = {{"", "x", false}};
+    up.dropBeforeAnswer = true;
+    CHECK_EQ(fake::request(up).code, 0);
+    up.dropBeforeAnswer = false;
+    up.uploads.clear();  // not even for a POST with no file
+    r = fake::request(up);
+    CHECK_EQ(r.code, 400);
+    CHECK(contains(r.body, "No file"));
+    up.uploads = {{"", "x", false}};
+    up.dropBeforeAnswer = true;
+    CHECK_EQ(fake::request(up).code, 0);
+    up.dropBeforeAnswer = false;
+    up.uploads = {{"three.gif", "x", false}};
+    CHECK_EQ(fake::request(up).code, 303);
+    up.uploads.clear();  // a POST without a file does not replay the previous result
+    r = fake::request(up);
+    CHECK_EQ(r.code, 400);
+    CHECK(contains(r.body, "No file"));
+    up.origin = "http://evil.example";  // ...and is checked like any other POST
+    r = fake::request(up);
+    CHECK_EQ(r.code, 403);
+    CHECK(contains(r.body, "another web site"));
+    up.origin = "http://192.168.1.42";
+    // One request with many files counts once against the rate limit.
+    for (int i = 0; i < 35; ++i) up.uploads.push_back({"many" + std::to_string(i) + ".gif", "x", false});
+    CHECK_EQ(fake::request(up).code, 303);
+    CHECK(fake::fileExists("/gifs/many34.gif"));
 
     up.args = {{"dir", "/"}};
     up.uploads = {{"config.json", "{\"mqtt_url\":\"evil\"}", false}};
@@ -212,10 +278,26 @@ static void testSettingsPage() {
     CHECK_EQ(saved, 1);
     CHECK(contains(fake::readFile("/config.json"), "\"TextRenderer.maxcharacter\":\"12\""));
 
-    r = post("/settings", {{"DMDRenderer.cols", "128"}});
-    CHECK_EQ(r.code, 200);
-    CHECK_EQ(fake::restarts, 1);
+    // Same checks as conf: a brightness the panel cannot use is not stored.
+    r = post("/settings", {{"DMDRenderer.brightness", "abc"}});
+    CHECK_EQ(r.code, 400);
+    CHECK(contains(r.body, "DMDRenderer.brightness"));
     CHECK_EQ(saved, 1);
+    CHECK_EQ(ConfigHelper::getInstance().getBrightness(), 90);
+    r = post("/settings", {{"DMDRenderer.brightness", "150"}, {"TextRenderer.maxcharacter", "14"}});
+    CHECK_EQ(r.code, 200);  // the valid one is still saved
+    CHECK(contains(r.body, "Other changes were saved"));
+    CHECK_EQ(saved, 2);
+    CHECK(contains(fake::readFile("/config.json"), "\"TextRenderer.maxcharacter\":\"14\""));
+    r = post("/settings", {{"DMDRenderer.brightness", "40"}});
+    CHECK_EQ(saved, 3);
+    CHECK_EQ(ConfigHelper::getInstance().getBrightness(), 40);
+
+    r = post("/settings", {{"DMDRenderer.cols", "128"}, {"DMDRenderer.brightness", "x"}});
+    CHECK_EQ(r.code, 200);
+    CHECK(contains(r.body, "restarting") && contains(r.body, "DMDRenderer.brightness"));
+    CHECK_EQ(fake::restarts, 1);
+    CHECK_EQ(saved, 3);
 }
 
 void testWeb() {

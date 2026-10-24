@@ -145,6 +145,12 @@ extern EspClass ESP;
 
 unsigned long millis();
 void delay(unsigned long ms);
+
+#define LOW 0
+#define HIGH 1
+#define INPUT_PULLUP 0x05
+void pinMode(uint8_t pin, uint8_t mode);
+int digitalRead(uint8_t pin);
 float temperatureRead();
 uint32_t getCpuFrequencyMhz();
 void configTzTime(const char* tz, const char* server1, const char* server2 = nullptr,

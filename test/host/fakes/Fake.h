@@ -24,6 +24,8 @@ extern std::string timezone;  // last configTzTime() TZ
 
 extern int restarts;
 extern int deepSleeps;
+// The BOOT button (GPIO0) stays pressed this long after pinMode() sets it up.
+extern unsigned long bootButtonHeldMs;
 void seedRandom(uint32_t seed);
 
 struct WiFiState {
@@ -32,6 +34,7 @@ struct WiFiState {
     std::string hostname = "dmd";
     int rssi = -58;
     int reconnects = 0;
+    int mode = 0;  // wifi_mode_t; the setup portal adds the access point
     std::function<void(int)> eventHandler;
 };
 extern WiFiState wifi;
@@ -59,6 +62,8 @@ struct MqttBroker {
     uint16_t port = 0;
     std::string clientId;
     uint16_t bufferSize = 0;
+    uint16_t socketTimeoutSec = 0;
+    unsigned long connectTakesMs = 0;  // how long connect() blocks
     std::vector<std::string> subscriptions;
     std::vector<std::pair<std::string, std::string>> published;
     std::vector<std::pair<std::string, std::string>> incoming;  // delivered by PubSubClient::loop()
@@ -98,6 +103,8 @@ struct WebRequest {
     std::string host = "192.168.1.42";
     std::string origin;
     std::vector<Upload> uploads;
+    // The connection breaks after the uploads, before the handler answers (no response).
+    bool dropBeforeAnswer = false;
 };
 struct WebResponse {
     int code = 0;

@@ -25,8 +25,8 @@ std::string formatDateTime(const std::string& format, const DateTime& dt, const 
 // "fr_FR" -> "fr", "en_GB" -> "en"; anything unknown -> "fr".
 std::string languageFromLocale(const std::string& locale);
 
-// IANA zone name ("Europe/Paris") -> POSIX TZ string for configTzTime(). Strings that already
-// look like POSIX TZ ("CET-1CEST,M3.5.0,M10.5.0/3") are returned unchanged; unknown names -> Paris.
+// IANA zone name ("Europe/Paris", "Etc/GMT-1") -> POSIX TZ string for configTzTime(). Strings that
+// already look like POSIX TZ ("CET-1CEST,M3.5.0,M10.5.0/3") are returned unchanged; unknown names -> Paris.
 std::string posixTimezone(const std::string& zone);
 
 // DMDRenderer.brightnesshours: 24 comma-separated percents, one per hour.

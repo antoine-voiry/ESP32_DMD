@@ -35,7 +35,9 @@ private:
     // Registers a route behind the Host / Origin checks.
     void route(const char* path, HTTPMethod method, void (LocalWebServer::*handler)());
     // 0 when the request may proceed, else the HTTP status to refuse it with (403, 429).
-    int refusal(bool post);
+    int refusal(bool post, bool countRequest = true);
+    // 403 body: where the pages can be opened instead (and the LAN domain to set, if that is it).
+    std::string forbiddenText();
     bool requestAllowed(bool post);
     bool checkRateLimit();
     void redirect(const char* location);
@@ -48,6 +50,11 @@ private:
     void handleFiles();
     void handleUpload();
     void handleUploadDone();
+    void resetUploadRequest();
+    // "address:port" of the client being served: one request per connection.
+    std::string clientKey();
+    // The configured LAN domain if valid, else "" (validated when it changes, not per request).
+    const std::string& lanDomain();
     void handleDelete();
     void handleSettings();
     void handleSaveSettings();
@@ -57,12 +64,23 @@ private:
 
     WebServer _server;
     std::string _hostname;
+    std::string _lanDomainChecked;
+    std::string _lanDomain;
     unsigned long _requestTimes[kMaxRequestsPerWindow] = {};
     int _requestIndex = 0;
     File _uploadFile;
     std::string _uploadTarget;
+    // Per file:
     bool _uploadFailed = false;
+    // Per request (one POST may carry several files). handleUploadDone() resets it, but the server
+    // drops a broken request without calling it, so the state is also keyed on the client. The
+    // WebServer answers "Connection: close" and drops the client after every request (core 2.0.17
+    // and 3.3.5 alike; only server-sent events stay open), so a new address:port is a new request.
+    bool _uploadStarted = false;
+    std::string _uploadClient;
     int _uploadRefusal = 0;
+    int _uploadFiles = 0;
+    int _uploadFailures = 0;
     std::function<void()> _onSettingsSaved;
     std::function<bool(const std::string&)> _onCommand;
     std::function<Status()> _statusProvider;
