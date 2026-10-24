@@ -55,6 +55,11 @@ static void testConfigHelper() {
     config.setSetting("DMDRenderer", "brightnesshours", "");
     config.setSetting("Running", "attract_mode", "abc");
     CHECK_EQ(config.getBrightness(), 70);
+    CHECK(!config.setSetting("DMDRenderer", "brightness", "abc"));
+    CHECK(!config.setSetting("DMDRenderer", "Brightness", ""));
+    CHECK(!config.setSetting("DMDRenderer", "brightness", "101"));
+    CHECK(!config.setSetting("DMDRenderer", "brightness", "-1"));
+    CHECK_EQ(config.getBrightness(), 70);
     CHECK_EQ(config.getSetting("DMDRenderer", "brightnesshours", "def"), std::string("def"));
     CHECK_EQ(config.getSettingInt("Running", "attract_mode", 5), 5L);  // not a number
     CHECK_EQ(config.getSettingInt("Running", "missing", 7), 7L);
@@ -170,6 +175,23 @@ static void testSettings() {
     CHECK(!settings::showWebAddress());
     CHECK_EQ(settings::attractAfterMs(), 30000u);
     CHECK_EQ(settings::owmConfig().callEveryMin, 5);
+
+    // Durations: negative -> default, huge -> one day (never a uint32 overflow).
+    setSetting("ClockRenderer", "timeShow_Date", "-1");
+    setSetting("ClockRenderer", "timeShow_Hours", "99999999");
+    setSetting("OpenWeatherMap", "seeduring", "-3");
+    setSetting("OpenWeatherMap", "callevery", "99999999");
+    setSetting("Running", "attract_mode", "-5");
+    clock = settings::clockSpec();
+    CHECK_EQ(clock.dateMs, 2000u);
+    CHECK_EQ(clock.hoursMs, 86400000u);
+    CHECK_EQ(settings::owmConfig().seeDuringSec, 4);
+    setSetting("OpenWeatherMap", "seeduring", "99999");
+    CHECK_EQ(settings::owmConfig().seeDuringSec, 60);
+    CHECK_EQ(settings::owmConfig().callEveryMin, 1440);
+    CHECK_EQ(settings::attractAfterMs(), 0u);
+    setSetting("Running", "attract_mode", "99999999");
+    CHECK_EQ(settings::attractAfterMs(), 86400000u);
 }
 
 static void testMqtt() {
@@ -215,6 +237,46 @@ static void testMqtt() {
     CHECK(!mqtt.loop(7030));
     CHECK_EQ(fake::mqtt.connectAttempts, 2);  // retried kRetryMs after the last attempt
     CHECK(mqtt.loop(12030));
+
+    // A broker that stays down: connect() blocks the loop, so attempts get further apart.
+    freshBoard();
+    fake::mqtt.acceptConnections = false;
+    MQTTHelper down("10.0.0.2", "dmd", "t");
+    CHECK_EQ(fake::mqtt.socketTimeoutSec, MQTTHelper::kSocketTimeoutSec);
+    uint32_t t = 1000;
+    down.loop(t);
+    int attempts = 1;
+    for (uint32_t wait : {5000u, 10000u, 20000u, 30000u, 30000u}) {
+        down.loop(t + wait - 1);
+        CHECK_EQ(fake::mqtt.connectAttempts, attempts);
+        t += wait;
+        down.loop(t);
+        CHECK_EQ(fake::mqtt.connectAttempts, ++attempts);
+    }
+    // A success resets the delay: the first failure after a drop waits kRetryMs again.
+    fake::mqtt.acceptConnections = true;
+    t += 30000;
+    CHECK(down.loop(t));
+    ++attempts;
+    fake::mqtt.connected = false;
+    fake::mqtt.acceptConnections = false;
+    t += 5000;
+    CHECK(!down.loop(t));
+    CHECK_EQ(fake::mqtt.connectAttempts, ++attempts);
+    CHECK(!down.loop(t + 5000));
+    CHECK_EQ(fake::mqtt.connectAttempts, ++attempts);
+
+    // A slow failure (5 s blocked in connect) does not shorten the wait before the next attempt.
+    freshBoard();
+    fake::mqtt.acceptConnections = false;
+    fake::mqtt.connectTakesMs = 5000;
+    MQTTHelper slow("10.0.0.2", "dmd", "t");
+    slow.loop(1000);
+    CHECK_EQ(fake::mqtt.connectAttempts, 1);
+    slow.loop(1000 + 5000 + 4999);  // 5 s after the attempt ended, minus 1 ms
+    CHECK_EQ(fake::mqtt.connectAttempts, 1);
+    slow.loop(1000 + 5000 + 5000);
+    CHECK_EQ(fake::mqtt.connectAttempts, 2);
 }
 
 static void testWifiSetup() {
@@ -278,13 +340,13 @@ static void testTimeService() {
     CHECK_EQ(fake::timezone, std::string("CET-1CEST,M3.5.0,M10.5.0/3"));
     CHECK(time.synced());
 
-    ConfigHelper::getInstance().setBrightness(50);
+    ConfigHelper::getInstance().setSetting("DMDRenderer", "brightness", "50");
     time.loop(millis(), renderer);  // no brightnesshours: the fixed brightness stays
     CHECK_EQ(fake::panel()->brightness, 230);
 
     std::string hours;
     for (int h = 0; h < 24; ++h) hours += (h ? "," : "") + std::to_string(h == 14 ? 20 : 80);
-    ConfigHelper::getInstance().setBrightnessHours(hours);
+    ConfigHelper::getInstance().setSetting("DMDRenderer", "brightnesshours", hours);
     time.invalidate();
     time.loop(millis(), renderer);  // 12:00 UTC = 14:00 in Paris
     CHECK_EQ(fake::panel()->brightness, 20 * 255 / 100);

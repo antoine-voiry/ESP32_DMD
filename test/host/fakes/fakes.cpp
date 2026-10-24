@@ -316,6 +316,11 @@ PubSubClient& PubSubClient::setCallback(Callback callback) {
     _callback = std::move(callback);
     return *this;
 }
+PubSubClient& PubSubClient::setSocketTimeout(uint16_t seconds) {
+    fake::mqtt.socketTimeoutSec = seconds;
+    return *this;
+}
+
 bool PubSubClient::setBufferSize(uint16_t size) {
     _bufferSize = size;
     fake::mqtt.bufferSize = size;
@@ -323,6 +328,7 @@ bool PubSubClient::setBufferSize(uint16_t size) {
 }
 bool PubSubClient::connect(const char* clientId) {
     ++fake::mqtt.connectAttempts;
+    fake::advance(fake::mqtt.connectTakesMs);
     fake::mqtt.clientId = clientId;
     fake::mqtt.connected = fake::mqtt.acceptConnections;
     return fake::mqtt.connected;
@@ -603,6 +609,10 @@ WebResponse request(const WebRequest& r) {
         s->_headers["Origin"] = r.origin;
     }
     s->_args = r.args;
+    // A new connection (new client port) for every request, as browsers do with "Connection: close".
+    static uint16_t nextPort = 50000;
+    s->_client._remoteIP = IPAddress(192, 168, 1, 10);
+    s->_client._remotePort = nextPort++;
     const HTTPMethod method = r.post ? HTTP_POST : HTTP_GET;
     for (WebServer::Route& route : s->_routes) {
         if (route.uri != r.uri || (route.method != HTTP_ANY && route.method != method)) continue;
@@ -626,7 +636,10 @@ WebResponse request(const WebRequest& r) {
                 }
                 up.status = u.abort ? UPLOAD_FILE_ABORTED : UPLOAD_FILE_END;
                 route.upload();
+                // Like the real server: an aborted request is dropped without calling its handler.
+                if (u.abort) return FakeWebAccess::response;
             }
+            if (r.dropBeforeAnswer) return FakeWebAccess::response;
         }
         route.handler();
         if (FakeWebAccess::response.sends != 1) {

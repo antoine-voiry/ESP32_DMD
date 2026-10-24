@@ -25,6 +25,11 @@ DMDRenderer::DMDRenderer(Hub75_Matrix* matrix) : _dmd(matrix) {}
 
 void DMDRenderer::update() {
     _runner.update(millis());
+    if (_runner.dropped() != _droppedReported) {
+        ESP_LOGW(TAG, "Display queue full: refused %u scene(s) so far",
+                 static_cast<unsigned>(_runner.dropped()));
+        _droppedReported = _runner.dropped();
+    }
 }
 
 void DMDRenderer::interrupt() {

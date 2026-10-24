@@ -44,17 +44,29 @@ static void testParseCommand() {
     CHECK(!parseCommand("msg", c));
 }
 
+// What the firmware accepts from MQTT or the web page (see MessageHandler::handleMessage).
+static bool accepted(const std::string& payload) {
+    Command cmd;
+    return parseCommand(payload, cmd) && isAcceptedCommand(cmd);
+}
+
 static void testFilter() {
-    CHECK(isAcceptedPayload("msg|Hello"));
-    CHECK(isAcceptedPayload("rebt|"));
-    CHECK(!isAcceptedPayload("rebt"));           // no '|' -> rejected like the original
-    CHECK(!isAcceptedPayload("unknown|x"));
-    CHECK(isAcceptedPayload("score|S20 - T20 - X"));
-    CHECK(isAcceptedPayload("score|sb - db - t1"));  // case-insensitive
-    CHECK(!isAcceptedPayload("score|S21 - T20 - X"));
-    CHECK(!isAcceptedPayload("score|S20-T20-X"));    // wrong separator
-    CHECK(!isAcceptedPayload("score|S05 - T20 - X"));
-    CHECK(!isAcceptedPayload("score|"));
+    CHECK(accepted("msg|Hello"));
+    CHECK(accepted("rebt|"));
+    CHECK(!accepted("rebt"));           // no '|' -> rejected like the original
+    Command parsed;
+    CHECK(parseCommand("score|T20 - S1", parsed) && isAcceptedCommand(parsed));
+    CHECK(parseCommand("score|T21", parsed) && !isAcceptedCommand(parsed));
+    CHECK(parseCommand("nope|x", parsed) && !isAcceptedCommand(parsed));
+    CHECK(!accepted("unknown|x"));
+    CHECK_EQ(knownActions().size(), 35u);
+    CHECK_EQ(knownActions().front(), std::string("rebt"));
+    CHECK(accepted("score|S20 - T20 - X"));
+    CHECK(accepted("score|sb - db - t1"));  // case-insensitive
+    CHECK(!accepted("score|S21 - T20 - X"));
+    CHECK(!accepted("score|S20-T20-X"));    // wrong separator
+    CHECK(!accepted("score|S05 - T20 - X"));
+    CHECK(!accepted("score|"));
     CHECK_EQ(minArgs("msgmovebcl"), 3u);
     CHECK_EQ(minArgs("msgcolor"), 3u);
     CHECK_EQ(minArgs("rebt"), 0u);
@@ -181,6 +193,15 @@ struct FakeScene : Scene {
     int frames;
 };
 
+// Scene that runs for a set time, like effects and the clock.
+struct TimedScene : FakeScene {
+    TimedScene(std::vector<std::string>& log, std::string name, uint32_t ms)
+        : FakeScene(log, std::move(name), 1), ms(ms) {}
+    uint32_t durationMs() const override { return ms; }
+    void limitDuration(uint32_t limit) override { ms = limit; }
+    uint32_t ms;
+};
+
 static void testSceneRunner() {
     std::vector<std::string> log;
     SceneRunner r;
@@ -228,6 +249,50 @@ static void testSceneRunner() {
     CHECK_EQ(log.size(), 1u);
     w.update(0x60u);
     CHECK_EQ(log.size(), 2u);
+
+    // A flood behind a hold: the queue keeps the first kMaxQueued scenes, whole and in order.
+    SceneRunner f;
+    log.clear();
+    f.enqueue(std::make_unique<FakeScene>(log, "held", 1), 60000);
+    f.update(0);
+    for (size_t i = 0; i < SceneRunner::kMaxQueued + 5; ++i) {
+        f.enqueue(std::make_unique<FakeScene>(log, "m" + std::to_string(i), 1), 60000);
+    }
+    CHECK_EQ(f.queued(), SceneRunner::kMaxQueued);
+    CHECK_EQ(f.dropped(), 5u);
+    f.update(60000);
+    CHECK_EQ(log.back(), std::string("m0:start"));  // the newest five were refused
+
+    // Queued holds share one budget: a flood of long holds cannot freeze the display for hours.
+    SceneRunner h;
+    log.clear();
+    for (int i = 0; i < 5; ++i) h.enqueue(std::make_unique<FakeScene>(log, "h" + std::to_string(i), 1), 400000);
+    // 400 s + 200 s, then kMinHoldMs each: a late score still shows for a moment.
+    CHECK_EQ(h.queuedMs(), SceneRunner::kMaxQueuedMs + 3 * SceneRunner::kMinHoldMs);
+    h.enqueue(std::make_unique<FakeScene>(log, "short", 1), 2000);  // shorter than kMinHoldMs: kept
+    CHECK_EQ(h.queuedMs(), SceneRunner::kMaxQueuedMs + 3 * SceneRunner::kMinHoldMs + 2000);
+    // Timed scenes (effects, the clock) count too, and are shortened.
+    CHECK_EQ(h.allowance(600000), SceneRunner::kMinHoldMs);
+    CHECK_EQ(h.allowance(1000), 1000u);
+    auto timed = std::make_unique<TimedScene>(log, "fx", 600000);
+    TimedScene* fx = timed.get();
+    h.enqueue(std::move(timed));
+    CHECK_EQ(fx->ms, SceneRunner::kMinHoldMs);
+    CHECK_EQ(h.queuedMs(), SceneRunner::kMaxQueuedMs + 4 * SceneRunner::kMinHoldMs + 2000);
+    uint32_t now = 0;
+    while (!h.idle(now) && now < 2000000) h.update(now += 1000);
+    CHECK(now <= SceneRunner::kMaxQueuedMs + 3 * SceneRunner::kMinHoldMs + 3000);
+    CHECK_EQ(log.size(), 7u);
+    CHECK_EQ(h.queuedMs(), 0u);
+    // Alone on an idle display, a scene keeps all its time (a one-hour clock stays an hour).
+    CHECK_EQ(h.allowance(3600000), 3600000u);
+    auto hour = std::make_unique<TimedScene>(log, "clock", 3600000);
+    TimedScene* clock = hour.get();
+    h.enqueue(std::move(hour), 3000);
+    CHECK_EQ(clock->ms, 3600000u);
+    CHECK_EQ(h.queuedMs(), 3603000u);
+    h.reset();
+    CHECK_EQ(h.queuedMs(), 0u);
 }
 
 static void testFx() {
@@ -237,8 +302,8 @@ static void testFx() {
     FxText tf;
     CHECK(parseFxText("typewriter", tf) && tf == FxText::Typewriter);
     CHECK(!parseFxText("plasma", tf));
-    CHECK(isAcceptedPayload("fx|plasma"));
-    CHECK(isAcceptedPayload("msgfx|Hello|rainbow|3"));
+    CHECK(accepted("fx|plasma"));
+    CHECK(accepted("msgfx|Hello|rainbow|3"));
     CHECK_EQ(minArgs("msgfx"), 2u);
 
     Rgb red = hsv(0);
@@ -341,6 +406,17 @@ static void testClockFormat() {
     CHECK_EQ(posixTimezone("Europe/London"), std::string("GMT0BST,M3.5.0/1,M10.5.0"));
     CHECK_EQ(posixTimezone("EST5EDT"), std::string("EST5EDT"));
     CHECK_EQ(posixTimezone("Mars/Olympus"), std::string("CET-1CEST,M3.5.0,M10.5.0/3"));
+    CHECK_EQ(posixTimezone("Etc/GMT-1"), std::string("<+01>-1"));  // UTC+1: IANA signs are reversed
+    CHECK_EQ(posixTimezone("Etc/GMT+5"), std::string("<-05>5"));
+    CHECK_EQ(posixTimezone("Etc/GMT-14"), std::string("<+14>-14"));
+    CHECK_EQ(posixTimezone("Etc/GMT"), std::string("UTC0"));
+    CHECK_EQ(posixTimezone("Etc/UTC"), std::string("UTC0"));
+    CHECK_EQ(posixTimezone("Etc/GMT-0"), std::string("UTC0"));
+    CHECK_EQ(posixTimezone("Etc/GMT+13"), std::string("CET-1CEST,M3.5.0,M10.5.0/3"));
+    CHECK_EQ(posixTimezone("Etc/GMT5"), std::string("CET-1CEST,M3.5.0,M10.5.0/3"));
+    CHECK_EQ(posixTimezone("Etc/GMT+5x"), std::string("CET-1CEST,M3.5.0,M10.5.0/3"));
+    CHECK_EQ(posixTimezone("America/Argentina/Buenos_Aires2"), std::string("CET-1CEST,M3.5.0,M10.5.0/3"));
+    CHECK_EQ(posixTimezone("<+0330>-3:30"), std::string("<+0330>-3:30"));
 
     const std::string hours = "10,10,10,10,10,10,50,90,90,90,90,90,90,90,90,90,90,90,90,90,90,60,30,10";
     CHECK_EQ(brightnessForHour(hours, 0, 77), 10);
@@ -752,6 +828,42 @@ static void testWebGuard() {
     CHECK(hostAllowed("DMD", ip, "dmd"));
     CHECK(hostAllowed("DMD.Local", ip, "dmd"));
     CHECK(hostAllowed("dmd.fritz.box:80", ip, "Dmd"));
+    CHECK(hostAllowed("dmd.lan", ip, "dmd"));
+    CHECK(hostAllowed("dmd.home.arpa", ip, "dmd"));
+    CHECK(hostAllowed("dmd.home.lan", ip, "dmd"));
+    CHECK(hostAllowed("dmd.office.corp", ip, "dmd"));
+    CHECK(hostAllowed("dmd.local.", ip, "dmd"));
+    CHECK(hostAllowed("dmd.", ip, "dmd"));
+    CHECK(!hostAllowed("dmd.evillan", ip, "dmd"));
+    CHECK(!hostAllowed("dmd..lan", ip, "dmd") && !hostAllowed(".", ip, "dmd"));
+    // DNS rebinding: a public domain starting with the hostname can point anywhere.
+    CHECK(!hostAllowed("dmd.attacker.example", ip, "dmd"));
+    CHECK(!hostAllowed("dmd.local.attacker.example", ip, "dmd"));
+    CHECK(!originAllowed("http://dmd.attacker.example", ip, "dmd"));
+    // The user's own LAN domain, set on the /config page.
+    CHECK(!hostAllowed("dmd.station", ip, "dmd"));
+    CHECK(hostAllowed("dmd.station", ip, "dmd", "Station"));
+    CHECK(hostAllowed("dmd.office.corp2:80", ip, "dmd", "office.corp2"));
+    CHECK(originAllowed("http://dmd.station", ip, "dmd", "station"));
+    CHECK(!hostAllowed("dmd.other.station", ip, "dmd", "station"));  // exactly that domain
+    CHECK(!hostAllowed("dmd.x", ip, "dmd", ""));
+    CHECK(isValidLanDomain("station") && isValidLanDomain("my-lan") && isValidLanDomain(std::string(63, 'a')));
+    CHECK(isValidLanDomain("office.corp") && isValidLanDomain("a.b.station"));
+    CHECK(!isValidLanDomain("home.example.net") && !isValidLanDomain("lan.mycompany.com") &&
+          !isValidLanDomain("a.-b.station") && !isValidLanDomain(std::string(64, 'a') + ".station"));
+    CHECK(!isValidLanDomain("") && !isValidLanDomain(".lan") && !isValidLanDomain("lan.") &&
+          !isValidLanDomain("a..b") && !isValidLanDomain("a b") && !isValidLanDomain("<x>") &&
+          !isValidLanDomain("-lan") && !isValidLanDomain("co.uk") && !isValidLanDomain("github.io"));
+    CHECK(!isValidLanDomain(std::string(64, 'a')) && !isValidLanDomain(std::string(250, 'a') + ".lan"));
+    CHECK(!isValidLanDomain("com") && !isValidLanDomain("FR") && !isValidLanDomain("shop"));
+    CHECK(!isValidLanDomain("ai") && !isValidLanDomain("pl") && !isValidLanDomain("network") &&
+          !isValidLanDomain("google") && !isValidLanDomain("aaa") && !isValidLanDomain("zone"));
+    CHECK(isValidLanDomain("lan") && isValidLanDomain("home") && isValidLanDomain("speedport"));
+    CHECK_EQ(lanSuffix("DMD.Station.:80", "dmd"), std::string("station"));
+    CHECK_EQ(lanSuffix("dmd", "dmd"), std::string(""));
+    CHECK_EQ(lanSuffix("other.station", "dmd"), std::string(""));
+    CHECK_EQ(lanSuffix("x.lan", ""), std::string(""));
+
     CHECK(!hostAllowed("dmdx.local", ip, "dmd"));
     CHECK(!hostAllowed("evil.example", ip, "dmd"));
     CHECK(!hostAllowed("evil.example", ip, ""));

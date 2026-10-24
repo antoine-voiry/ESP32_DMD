@@ -77,7 +77,7 @@ renderer. It accepts the same messages and settings, with no Pi needed.
 | `/` | Board status (IP, Wi-Fi, MQTT, uptime, memory, storage), a send box and presets |
 | `/settings` | Every Raspy2DMD setting, grouped by section. Settings with no effect on the ESP32 are greyed out |
 | `/files` | Upload, browse and delete GIFs, images, carousel texts and `effets.txt` (about 900 KB of LittleFS) |
-| `/config` | MQTT broker, topic and hostname (saving restarts the board) |
+| `/config` | MQTT broker, topic, hostname, and an optional LAN domain (saving restarts the board) |
 
 ## How it works
 

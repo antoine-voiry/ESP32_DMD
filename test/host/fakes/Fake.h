@@ -59,6 +59,8 @@ struct MqttBroker {
     uint16_t port = 0;
     std::string clientId;
     uint16_t bufferSize = 0;
+    uint16_t socketTimeoutSec = 0;
+    unsigned long connectTakesMs = 0;  // how long connect() blocks
     std::vector<std::string> subscriptions;
     std::vector<std::pair<std::string, std::string>> published;
     std::vector<std::pair<std::string, std::string>> incoming;  // delivered by PubSubClient::loop()
@@ -98,6 +100,8 @@ struct WebRequest {
     std::string host = "192.168.1.42";
     std::string origin;
     std::vector<Upload> uploads;
+    // The connection breaks after the uploads, before the handler answers (no response).
+    bool dropBeforeAnswer = false;
 };
 struct WebResponse {
     int code = 0;

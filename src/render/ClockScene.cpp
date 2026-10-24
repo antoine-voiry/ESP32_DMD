@@ -32,6 +32,20 @@ uint32_t ClockScene::durationMs() const {
     }
 }
 
+void ClockScene::limitDuration(uint32_t ms) {
+    const uint32_t full = durationMs();
+    if (full == 0 || ms >= full) return;
+    // Each page keeps at least a second (or its own length, if shorter), so neither vanishes.
+    constexpr uint32_t kMinPageMs = 1000;
+    auto scaled = [&](uint32_t page) {
+        const uint32_t s = static_cast<uint32_t>(static_cast<uint64_t>(page) * ms / full);
+        const uint32_t floor = page < kMinPageMs ? page : kMinPageMs;
+        return s < floor ? floor : s;
+    };
+    _spec.dateMs = scaled(_spec.dateMs);
+    _spec.hoursMs = scaled(_spec.hoursMs);
+}
+
 bool ClockScene::showingDate(uint32_t elapsedMs) const {
     if (_spec.mode == 3) return true;
     if (_spec.mode == 4) return false;

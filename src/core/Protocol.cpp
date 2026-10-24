@@ -125,9 +125,14 @@ bool isValidScore(const std::string& score) {
     return true;
 }
 
-bool isAcceptedPayload(const std::string& payload) {
-    Command cmd;
-    if (!parseCommand(payload, cmd) || !isKnownAction(cmd.action)) {
+std::vector<std::string> knownActions() {
+    std::vector<std::string> names;
+    for (const auto& spec : kActions) names.push_back(spec.name);
+    return names;
+}
+
+bool isAcceptedCommand(const Command& cmd) {
+    if (!isKnownAction(cmd.action)) {
         return false;
     }
     if (cmd.action == "score") {

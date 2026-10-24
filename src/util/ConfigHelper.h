@@ -25,17 +25,20 @@ public:
     void setMqttUrl(const std::string& value) { _mqttUrl = value; }
     void setMqttPath(const std::string& value) { _mqttPath = value; }
     void setHostname(const std::string& value) { _hostname = value; }
+    // Optional LAN domain the web pages also answer on (see core/WebGuard.h).
+    const std::string& getLanDomain() const { return _lanDomain; }
+    void setLanDomain(const std::string& value) { _lanDomain = value; }
 
-    // [DMDRenderer] brightness (0..100 %) and brightnesshours (24 comma-separated percents).
+    // [DMDRenderer] brightness (0..100 %) and brightnesshours (24 comma-separated percents);
+    // set them with setSetting(), which checks the brightness.
     int getBrightness() const { return _brightness; }
-    void setBrightness(int percent) { _brightness = percent; }
     const std::string& getBrightnessHours() const { return _brightnessHours; }
-    void setBrightnessHours(const std::string& hours) { _brightnessHours = hours; }
 
     // `fallback` when the setting is absent or empty.
     std::string getSetting(const std::string& section, const std::string& key, const std::string& fallback) const;
     long getSettingInt(const std::string& section, const std::string& key, long fallback) const;
-    void setSetting(const std::string& section, const std::string& key, const std::string& value);
+    // False (and nothing stored) for a brightness that is not a whole number from 0 to 100.
+    bool setSetting(const std::string& section, const std::string& key, const std::string& value);
 
 private:
     ConfigHelper() = default;
@@ -43,6 +46,7 @@ private:
     std::string _mqttUrl;
     std::string _mqttPath;
     std::string _hostname;
+    std::string _lanDomain;
     int _brightness = 90;
     std::string _brightnessHours;
     std::map<std::string, std::string> _settings;

@@ -7,6 +7,7 @@
 
 #include "Storage.h"
 #include "core/ConfigSchema.h"
+#include "core/Protocol.h"
 
 static const char* TAG = "Config";
 
@@ -48,6 +49,7 @@ bool ConfigHelper::loadConfigFile() {
     _mqttUrl = json["mqtt_url"] | "";
     _mqttPath = json["mqtt_path"] | "";
     _hostname = json["hostname"] | "";
+    _lanDomain = json["lan_domain"] | "";
     _brightness = json["brightness"] | 90;
     _brightnessHours = json["brightnesshours"] | "";
     for (JsonPairConst kv : json["settings"].as<JsonObjectConst>()) {
@@ -71,6 +73,7 @@ bool ConfigHelper::saveConfigFile() const {
     json["mqtt_url"] = _mqttUrl;
     json["mqtt_path"] = _mqttPath;
     json["hostname"] = _hostname;
+    if (!_lanDomain.empty()) json["lan_domain"] = _lanDomain;
     json["brightness"] = _brightness;
     json["brightnesshours"] = _brightnessHours;
     JsonObject settings = json["settings"].to<JsonObject>();
@@ -103,13 +106,16 @@ long ConfigHelper::getSettingInt(const std::string& section, const std::string& 
     return value.empty() || *end != '\0' ? fallback : parsed;
 }
 
-void ConfigHelper::setSetting(const std::string& section, const std::string& key, const std::string& value) {
+bool ConfigHelper::setSetting(const std::string& section, const std::string& key, const std::string& value) {
     const std::string k = dmd::normaliseKey(key);
     if (isBrightness(section, k)) {
-        _brightness = static_cast<int>(std::strtol(value.c_str(), nullptr, 10));
+        const long pct = dmd::parseIntArg(value, -1);
+        if (pct < 0 || pct > 100) return false;
+        _brightness = static_cast<int>(pct);
     } else if (isBrightnessHours(section, k)) {
         _brightnessHours = value;
     } else {
         _settings[section + "." + k] = value;
     }
+    return true;
 }

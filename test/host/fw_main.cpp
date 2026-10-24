@@ -15,6 +15,13 @@ void loops(int n) {
 
 bool contains(const std::string& s, const std::string& part) { return s.find(part) != std::string::npos; }
 
+bool showsRed(const MatrixPanel_I2S_DMA* p) {
+    for (uint16_t c : p->shown) {
+        if ((c >> 11) >= 24 && (c & 0x07FF) == 0) return true;
+    }
+    return false;
+}
+
 }  // namespace
 
 void testMain() {
@@ -35,11 +42,29 @@ void testMain() {
     CHECK_EQ(fake::mqtt.host, std::string("10.0.0.5"));  // .local resolved with mDNS
     CHECK_EQ(fake::mqtt.clientId.size(), 0u);            // not connected before loop()
 
+    // Broker not up yet at boot: the welcome sequence (web address, then the red logo) still plays,
+    // followed by the status line.
+    fake::mqtt.acceptConnections = false;
+    bool logo = false;
+    for (int i = 0; i < 10000 && !logo; ++i) {
+        loop();
+        logo = showsRed(p);
+    }
+    CHECK(logo);
+    CHECK(!fake::mqtt.connected);
+    loops(1500);
+    CHECK(showsRed(p));   // the logo stays up a moment...
+    loops(1000);
+    CHECK(!showsRed(p));  // ...then the status line replaces it
+    CHECK(p->litPixels() > 0);
+
+    fake::mqtt.acceptConnections = true;
+    fake::advance(60000);
     loops(10);
     CHECK(fake::mqtt.connected);
     CHECK_EQ(fake::mqtt.clientId, std::string("dmd-salon"));
     CHECK_EQ(fake::mqtt.subscriptions[0], std::string("raspydarts/#"));
-    loops(8000);  // welcome text, web address, logo
+    loops(8000);
 
     // MQTT messages reach the panel; invalid ones are dropped.
     fake::mqtt.incoming = {{"raspydarts/dmd", "garbage"}, {"raspydarts/dmd", "msg|Hello"}};

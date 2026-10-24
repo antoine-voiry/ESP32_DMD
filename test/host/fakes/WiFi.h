@@ -25,6 +25,11 @@ extern WiFiClass WiFi;
 class WiFiClient {
 public:
     virtual ~WiFiClient() = default;
+    IPAddress remoteIP() const { return _remoteIP; }
+    uint16_t remotePort() const { return _remotePort; }
+
+    IPAddress _remoteIP;
+    uint16_t _remotePort = 0;
 };
 
 #endif

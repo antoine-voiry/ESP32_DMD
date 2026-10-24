@@ -35,6 +35,8 @@ public:
     void start(uint32_t nowMs) override;
     bool tick(uint32_t nowMs) override;
     void abort() override;
+    uint32_t durationMs() const override { return _spec.durationMs; }
+    void limitDuration(uint32_t ms) override { _spec.durationMs = ms; }
 
 private:
     void drawFrame(uint32_t elapsedMs, uint32_t dtMs);

@@ -75,10 +75,13 @@ public:
     TextStyle& defaultStyle() { return _defaults; }
 
     bool idle() const;
+    // Scenes that can still be queued before the queue refuses them.
+    size_t queueRoom() const { return dmd::SceneRunner::kMaxQueued - _runner.queued(); }
 
 private:
     Hub75_Matrix* _dmd;
     dmd::SceneRunner _runner;
+    size_t _droppedReported = 0;
     TextStyle _defaults;
     bool _centerImages = true;
     MediaLibrary* _media = nullptr;

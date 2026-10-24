@@ -4,13 +4,35 @@
 
 namespace dmd {
 
+uint32_t SceneRunner::allowance(uint32_t wantedMs) const {
+    if (_queue.empty() && !(_current && _animating) && !_holding) return wantedMs;  // nothing ahead
+    uint32_t allowed = _queuedMs >= kMaxQueuedMs ? 0 : kMaxQueuedMs - _queuedMs;
+    if (allowed < kMinHoldMs) allowed = kMinHoldMs;
+    return wantedMs > allowed ? allowed : wantedMs;
+}
+
 void SceneRunner::enqueue(std::unique_ptr<Scene> scene, uint32_t holdMs) {
     if (!scene) {
         return;
     }
+    if (_queue.size() >= kMaxQueued) {
+        ++_dropped;
+        return;
+    }
+    uint32_t runMs = scene->durationMs();
+    if (runMs > 0) {
+        const uint32_t allowed = allowance(runMs);
+        if (allowed < runMs) {
+            scene->limitDuration(allowed);
+            runMs = scene->durationMs();
+        }
+    }
+    _queuedMs += runMs;
     Entry entry;
     entry.scene = std::move(scene);
-    entry.holdMs = holdMs;
+    entry.holdMs = allowance(holdMs);
+    entry.queuedMs = runMs + entry.holdMs;
+    _queuedMs += entry.holdMs;
     _queue.push_back(std::move(entry));
 }
 
@@ -22,6 +44,7 @@ void SceneRunner::interrupt() {
 
 void SceneRunner::reset() {
     _queue.clear();
+    _queuedMs = 0;
     if (_current && _animating) {
         _current->abort();
     }
@@ -58,6 +81,7 @@ void SceneRunner::update(uint32_t nowMs) {
     while (!_holding && !(_current && _animating) && !_queue.empty()) {
         Entry next = std::move(_queue.front());
         _queue.pop_front();
+        _queuedMs -= next.queuedMs;
         _current = std::move(next.scene);
         _currentHoldMs = next.holdMs;
         _animating = true;

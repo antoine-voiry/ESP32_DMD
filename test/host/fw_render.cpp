@@ -241,6 +241,16 @@ static void testClockScene() {
     CHECK_EQ(ClockScene(matrix, spec).durationMs(), spec.dateMs);
     spec.mode = 4;
     CHECK_EQ(ClockScene(matrix, spec).durationMs(), spec.hoursMs);
+
+    // Shortened by the display queue: pages scale together, and a short one never vanishes.
+    spec.mode = 2;
+    spec.dateMs = 2000;
+    spec.hoursMs = 86400000;
+    ClockScene longClock(matrix, spec);
+    longClock.limitDuration(5000);
+    CHECK_EQ(longClock.durationMs(), 1000u + 4999u);  // date floored at 1 s, hours scaled
+    longClock.limitDuration(1000000000);              // never lengthened
+    CHECK_EQ(longClock.durationMs(), 5999u);
     spec.mode = 1;  // did nothing on the Pi: date then time here
     CHECK_EQ(ClockScene(matrix, spec).durationMs(), spec.dateMs + spec.hoursMs);
 

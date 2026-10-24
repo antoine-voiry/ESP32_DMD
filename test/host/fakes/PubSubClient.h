@@ -16,6 +16,7 @@ public:
     PubSubClient& setServer(const char* host, uint16_t port);
     PubSubClient& setCallback(Callback callback);
     bool setBufferSize(uint16_t size);
+    PubSubClient& setSocketTimeout(uint16_t seconds);
     bool connect(const char* clientId);
     bool connected();
     int state();

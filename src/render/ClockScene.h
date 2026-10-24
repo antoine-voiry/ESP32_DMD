@@ -36,7 +36,9 @@ public:
     bool tick(uint32_t nowMs) override;
     void abort() override;
 
-    uint32_t durationMs() const;
+    uint32_t durationMs() const override;
+    // Scales the date and hours pages together.
+    void limitDuration(uint32_t ms) override;
 
 private:
     bool showingDate(uint32_t elapsedMs) const;
